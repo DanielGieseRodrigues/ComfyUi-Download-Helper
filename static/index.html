@@ -794,6 +794,7 @@ function switchTab(name) {
 let EDITOR_WF = null;     // original workflow JSON
 let EDITOR_MODEL = null;  // analyze() result
 let EDITOR_NAME = 'workflow';
+let REF_DIMS = null;      // {w, h} of the current reference image, when known
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -813,6 +814,7 @@ async function loadWorkflow(file) {
   const msg = document.getElementById('edMsg');
   msg.className = 'msg'; msg.textContent = 'Analyzing ' + file.name + '...';
   EDITOR_NAME = file.name.replace(/\.json$/i, '');
+  REF_DIMS = null;
   let text;
   try { text = await file.text(); EDITOR_WF = JSON.parse(text); }
   catch { msg.className = 'msg err'; msg.textContent = '✗ Could not read JSON.'; return; }
@@ -827,6 +829,19 @@ async function loadWorkflow(file) {
   msg.textContent = `✓ Recognized ${recog} of ${total} nodes.` +
     (recog < total ? ' Unrecognized nodes are left untouched.' : '');
   renderEditor(r);
+  fetchExistingRefSize();  // try to size off the image already in the workflow
+}
+
+// If the workflow already references an image, ask the server for its
+// dimensions (it lives in ComfyUI/input/) so the "From image" buttons work
+// without re-uploading.
+async function fetchExistingRefSize() {
+  const f = EDITOR_MODEL && EDITOR_MODEL.fields.find(x => x.role === 'reference_image');
+  if (!f || !f.value) return;
+  try {
+    const r = await fetch('/api/workflow/image-size?name=' + encodeURIComponent(f.value)).then(x => x.json());
+    if (r && r.width && r.height) setRefDims({w: r.width, h: r.height}, false);
+  } catch (e) { /* image not available locally — buttons stay disabled */ }
 }
 
 function renderEditor(model) {
@@ -878,6 +893,15 @@ function renderField(f) {
       <input type="text" id="${id}" value="${esc(f.value)}">
       <button class="ghost sm" type="button" onclick="document.getElementById('${id}-file').click()">📁 Browse</button>
       <input type="file" id="${id}-file" accept="image/*" class="hidden" onchange="uploadRefImage('${id}', this)">
+    </div>
+    <div class="hint" id="edRefDims" style="margin:4px 0 0;"></div>`;
+  } else if ((f.role === 'width' || f.role === 'height') && hasRefImageField()) {
+    // Number input + a button that fills BOTH width and height from the
+    // reference image, so the workflow matches the uploaded image's size.
+    control = `<div class="seedrow">
+      <input type="number" id="${id}" value="${esc(f.value)}" step="1">
+      <button class="ghost sm refsize-btn" type="button" onclick="applyRefSize()"
+        title="Use the reference image's dimensions" ${REF_DIMS ? '' : 'disabled'}>📐 From image</button>
     </div>`;
   } else if (f.type === 'combo') {
     const opts = (f.options || []).slice();
@@ -905,11 +929,49 @@ async function uploadRefImage(targetId, input) {
   const target = document.getElementById(targetId);
   const prev = target.value;
   target.value = 'uploading...';
+  const dims = await readImageDims(file);  // read locally before upload
   const fd = new FormData();
   fd.append('image', file);
   const r = await fetch('/api/workflow/upload-image', {method: 'POST', body: fd}).then(x => x.json());
   if (r.error) { target.value = prev; alert('Upload failed: ' + r.error); return; }
   target.value = r.filename;  // now lives in ComfyUI/input/, ready for LoadImage
+  if (dims) setRefDims(dims, true);  // auto-apply so Width/Height match the image
+}
+
+// Read an image File's natural pixel dimensions in the browser.
+function readImageDims(file) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { resolve({w: img.naturalWidth, h: img.naturalHeight}); URL.revokeObjectURL(url); };
+    img.onerror = () => { resolve(null); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+}
+
+// True when the workflow exposes a reference image (img2img / img2vid).
+function hasRefImageField() {
+  return !!(EDITOR_MODEL && EDITOR_MODEL.fields.some(f => f.role === 'reference_image'));
+}
+
+// Record the reference image's size, enable the "From image" buttons, show a
+// hint, and optionally apply it to the Width/Height fields right away.
+function setRefDims(dims, autoApply) {
+  REF_DIMS = dims;
+  const hint = document.getElementById('edRefDims');
+  if (hint) hint.textContent = `Image is ${dims.w}×${dims.h}px`;
+  document.querySelectorAll('.refsize-btn').forEach(b => { b.disabled = false; });
+  if (autoApply) applyRefSize();
+}
+
+// Fill the Width/Height fields from the reference image's dimensions.
+function applyRefSize() {
+  if (!REF_DIMS || !EDITOR_MODEL) return;
+  for (const f of EDITOR_MODEL.fields) {
+    if (f.role !== 'width' && f.role !== 'height') continue;
+    const el = document.getElementById('ef-' + f.id);
+    if (el) el.value = f.role === 'width' ? REF_DIMS.w : REF_DIMS.h;
+  }
 }
 
 function updateDurationHint() {

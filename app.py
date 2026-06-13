@@ -10,6 +10,7 @@ Serves a simple web page to:
 import json
 import logging
 import os
+import struct
 import threading
 import uuid
 
@@ -511,6 +512,99 @@ def workflow_export():
     modified, applied = workflow_editor.apply_edits(data, edits, duration_seconds)
     log.info("Workflow export: applied %d edit(s)", len(applied))
     return jsonify(workflow=modified, applied=applied)
+
+
+def _image_size(path):
+    """Return (width, height) for common image formats using only the stdlib.
+
+    Supports PNG, GIF, BMP, WebP and JPEG by reading just the header bytes —
+    no Pillow dependency. Returns ``None`` when the format is unknown or the
+    file can't be parsed.
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(26)
+            if len(head) < 24:
+                return None
+            # PNG
+            if head[:8] == b"\x89PNG\r\n\x1a\n":
+                w, h = struct.unpack(">II", head[16:24])
+                return int(w), int(h)
+            # GIF
+            if head[:6] in (b"GIF87a", b"GIF89a"):
+                w, h = struct.unpack("<HH", head[6:10])
+                return int(w), int(h)
+            # BMP
+            if head[:2] == b"BM":
+                w, h = struct.unpack("<ii", head[18:26])
+                return int(w), abs(int(h))
+            # WebP
+            if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+                chunk = head[12:16]
+                if chunk == b"VP8 ":
+                    fh.seek(26)
+                    data = fh.read(4)
+                    w = struct.unpack("<H", data[0:2])[0] & 0x3FFF
+                    h = struct.unpack("<H", data[2:4])[0] & 0x3FFF
+                    return int(w), int(h)
+                if chunk == b"VP8L":
+                    fh.seek(21)
+                    bits = struct.unpack("<I", fh.read(4))[0]
+                    w = (bits & 0x3FFF) + 1
+                    h = ((bits >> 14) & 0x3FFF) + 1
+                    return int(w), int(h)
+                if chunk == b"VP8X":
+                    fh.seek(24)
+                    data = fh.read(6)
+                    w = (data[0] | data[1] << 8 | data[2] << 16) + 1
+                    h = (data[3] | data[4] << 8 | data[5] << 16) + 1
+                    return int(w), int(h)
+            # JPEG: walk the segment markers until a Start-Of-Frame.
+            if head[:2] == b"\xff\xd8":
+                fh.seek(2)
+                while True:
+                    byte = fh.read(1)
+                    while byte and byte != b"\xff":
+                        byte = fh.read(1)
+                    marker = fh.read(1)
+                    while marker == b"\xff":  # skip fill bytes
+                        marker = fh.read(1)
+                    if not marker:
+                        return None
+                    m = marker[0]
+                    if 0xC0 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
+                        fh.read(3)  # segment length (2) + sample precision (1)
+                        h = struct.unpack(">H", fh.read(2))[0]
+                        w = struct.unpack(">H", fh.read(2))[0]
+                        return int(w), int(h)
+                    seg = fh.read(2)
+                    if len(seg) < 2:
+                        return None
+                    fh.seek(struct.unpack(">H", seg)[0] - 2, 1)
+    except (OSError, struct.error):
+        return None
+    return None
+
+
+@app.route("/api/workflow/image-size", methods=["GET"])
+def workflow_image_size():
+    """Return the dimensions of a reference image already living in
+    ComfyUI's input/ folder, so the editor can offer to match the
+    workflow's Width/Height to it."""
+    name = os.path.basename(request.args.get("name") or "")
+    if not name:
+        return jsonify(error="No image name."), 400
+    cfg = load_config()
+    path = cfg.get("comfyui_path")
+    if not path:
+        return jsonify(error="ComfyUI folder not set."), 400
+    img = os.path.join(path, "input", name)
+    if not os.path.isfile(img):
+        return jsonify(error="Image not found in input/."), 404
+    size = _image_size(img)
+    if not size:
+        return jsonify(error="Could not read image size."), 422
+    return jsonify(width=size[0], height=size[1])
 
 
 @app.route("/api/workflow/upload-image", methods=["POST"])
