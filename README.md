@@ -1,18 +1,18 @@
 # ComfyUI Download Helper
 
-Página local que lê um `workflow.json` do ComfyUI e baixa todas as dependências
-(modelos, VAE, text encoders, LoRAs) direto nas pastas certas.
+A local web page that reads a ComfyUI `workflow.json` and downloads all of its
+dependencies (models, VAEs, text encoders, LoRAs) straight into the right folders.
 
-## O que faz
+## What it does
 
-- Lê os links de modelos do workflow e baixa de **HuggingFace, Civitai, Civitai.red** ou URL direta.
-- Coloca cada arquivo na pasta certa (`models/diffusion_models/`, `models/loras/`, etc.).
-- Pula o que já existe.
-- Busca por nome quando um modelo não tem link.
+- Reads the model links from the workflow and downloads from **HuggingFace, Civitai, Civitai.red** or a direct URL.
+- Places each file in the correct folder (`models/diffusion_models/`, `models/loras/`, etc.).
+- Skips files that already exist.
+- Searches by name when a model has no link.
 
-## Como usar
+## How to use
 
-1. Rode o **`run.bat`** (cria o ambiente, instala as dependências e abre no navegador).
-2. Informe a pasta do seu ComfyUI.
-3. (Opcional) Cole os tokens de HuggingFace / Civitai / Civitai.red.
-4. Suba o `workflow.json` e clique em **Baixar tudo o que falta**.
+1. Run **`run.bat`** (it sets up the environment, installs the dependencies and opens it in your browser).
+2. Point it to your ComfyUI folder.
+3. (Optional) Paste your HuggingFace / Civitai / Civitai.red tokens.
+4. Upload the `workflow.json` and click **Download everything that's missing**.
