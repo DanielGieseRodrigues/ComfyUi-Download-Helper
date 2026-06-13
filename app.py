@@ -16,6 +16,7 @@ import uuid
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
+import workflow_editor
 from workflow_parser import MODEL_EXTS, extract_referenced, parse_workflow
 
 # Civitai model type -> ComfyUI subfolder.
@@ -392,6 +393,40 @@ def progress(job_id):
         if not job:
             return jsonify(error="job not found"), 404
         return jsonify(dict(job))
+
+
+# --------------------------------------------------------------------------- #
+# Workflow editor (second tab): friendly field editing
+# --------------------------------------------------------------------------- #
+def _load_workflow_from_request():
+    """Read a workflow JSON from either a multipart file or the JSON body."""
+    if "file" in request.files:
+        return json.load(request.files["file"])
+    return request.get_json(force=True)
+
+
+@app.route("/api/workflow/analyze", methods=["POST"])
+def workflow_analyze():
+    try:
+        data = _load_workflow_from_request()
+    except (json.JSONDecodeError, ValueError):
+        return jsonify(error="Invalid JSON."), 400
+    if not isinstance(data, dict):
+        return jsonify(error="Not a ComfyUI workflow."), 400
+    return jsonify(workflow_editor.analyze(data))
+
+
+@app.route("/api/workflow/export", methods=["POST"])
+def workflow_export():
+    body = request.get_json(force=True) or {}
+    data = body.get("workflow")
+    if not isinstance(data, dict):
+        return jsonify(error="Missing workflow."), 400
+    edits = body.get("edits") or {}
+    duration_seconds = body.get("duration_seconds")
+    modified, applied = workflow_editor.apply_edits(data, edits, duration_seconds)
+    log.info("Workflow export: applied %d edit(s)", len(applied))
+    return jsonify(workflow=modified, applied=applied)
 
 
 if __name__ == "__main__":

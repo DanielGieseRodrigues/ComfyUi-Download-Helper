@@ -91,12 +91,47 @@
   .res .fname { font-size: 13px; }
   .res .meta { color: var(--muted); font-size: 12px; }
   .res-status { font-size: 12px; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+  .tab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .duration-box { background: linear-gradient(180deg, rgba(79,140,255,.10), var(--panel2));
+    border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
+  .duration-box h3 { margin: 0 0 10px; font-size: 14px; }
+  .duration-box .row { align-items: center; }
+  .duration-box input { max-width: 130px; font-size: 16px; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  .field-grid .full { grid-column: 1 / -1; }
+  textarea { width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 11px; font-size: 13px; font-family: inherit; resize: vertical; min-height: 70px; }
+  textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+  select { width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 11px; font-size: 13px; }
+  input[type=number] { width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 9px 11px; font-size: 13px; }
+  .seedrow { display: flex; gap: 8px; align-items: center; }
+  .seedrow input { flex: 1; }
+  .chk { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  .adv-toggle { background: transparent; color: var(--accent); border: 0; padding: 8px 0; font-size: 13px; cursor: pointer; font-weight: 600; }
+  .warn-list { background: rgba(245,166,35,.10); border: 1px solid var(--warn); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 16px; font-size: 12px; color: var(--warn); }
+  .cat-badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600;
+    background: rgba(79,140,255,.15); color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🧩 ComfyUI Helper</h1>
-  <p class="sub">Upload a <code>workflow.json</code> and download every dependency straight into the right ComfyUI folders.</p>
+  <p class="sub">Tools to make working with ComfyUI workflows less painful.</p>
+
+  <div class="tabs">
+    <button class="tab active" id="tabBtn-downloader" onclick="switchTab('downloader')">📥 Model downloader</button>
+    <button class="tab" id="tabBtn-editor" onclick="switchTab('editor')">🎛️ Workflow editor</button>
+  </div>
+
+  <!-- ===================== TAB: DOWNLOADER ===================== -->
+  <div id="tab-downloader">
 
   <!-- Step 1: folder -->
   <div class="card">
@@ -186,6 +221,54 @@
       <tbody id="missingRows"></tbody>
     </table>
   </div>
+
+  </div><!-- /tab-downloader -->
+
+  <!-- ===================== TAB: EDITOR ===================== -->
+  <div id="tab-editor" class="hidden">
+    <div class="card">
+      <h2><span class="step">1</span> Load a workflow</h2>
+      <div class="drop" id="edDrop">
+        <div>Drag the <strong>workflow.json</strong> here or click to choose</div>
+        <input type="file" id="edFile" accept=".json" class="hidden">
+      </div>
+      <div class="msg" id="edMsg"></div>
+      <div class="hint">Edits never leave your machine. Custom node packs may not be fully recognized — anything we understand shows up below, the rest stays untouched.</div>
+    </div>
+
+    <div class="card hidden" id="edFormCard">
+      <div class="toolbar">
+        <h2 style="margin:0;"><span class="step">2</span> Edit</h2>
+        <span class="cat-badge" id="edCat"></span>
+        <div class="grow"></div>
+        <button onclick="exportWorkflow()" id="edExportBtn">⬇ Export workflow.json</button>
+      </div>
+      <div id="edWarnings"></div>
+
+      <!-- Duration (star feature) -->
+      <div class="duration-box hidden" id="edDurationBox">
+        <h3>🎬 Video duration</h3>
+        <div class="row">
+          <div style="flex:none;">
+            <label>Duration (seconds)</label>
+            <input type="number" id="edDuration" min="0" step="0.1" oninput="updateDurationHint()">
+          </div>
+          <div class="hint" id="edDurationHint" style="margin:0;"></div>
+        </div>
+      </div>
+
+      <!-- Prompts -->
+      <div id="edPrompts"></div>
+
+      <!-- Main fields -->
+      <div class="field-grid" id="edMain"></div>
+
+      <!-- Advanced -->
+      <button class="adv-toggle hidden" id="edAdvToggle" onclick="toggleAdvanced()">▸ Advanced</button>
+      <div class="field-grid hidden" id="edAdvanced" style="margin-top:6px;"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Search modal -->
@@ -479,6 +562,178 @@ async function downloadResult(res, dir, i) {
       else { st.textContent = '✗ ' + (j.error || 'error'); btn.disabled = false; }
     }
   }, 600);
+}
+
+// ---------- Tabs ----------
+function switchTab(name) {
+  for (const t of ['downloader', 'editor']) {
+    document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+    document.getElementById('tabBtn-' + t).classList.toggle('active', t === name);
+  }
+}
+
+// ---------- Workflow editor ----------
+let EDITOR_WF = null;     // original workflow JSON
+let EDITOR_MODEL = null;  // analyze() result
+let EDITOR_NAME = 'workflow';
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const edDrop = document.getElementById('edDrop');
+const edFile = document.getElementById('edFile');
+edDrop.onclick = () => edFile.click();
+edDrop.ondragover = e => { e.preventDefault(); edDrop.classList.add('over'); };
+edDrop.ondragleave = () => edDrop.classList.remove('over');
+edDrop.ondrop = e => { e.preventDefault(); edDrop.classList.remove('over'); if (e.dataTransfer.files[0]) loadWorkflow(e.dataTransfer.files[0]); };
+edFile.onchange = () => { if (edFile.files[0]) loadWorkflow(edFile.files[0]); };
+
+async function loadWorkflow(file) {
+  const msg = document.getElementById('edMsg');
+  msg.className = 'msg'; msg.textContent = 'Analyzing ' + file.name + '...';
+  EDITOR_NAME = file.name.replace(/\.json$/i, '');
+  let text;
+  try { text = await file.text(); EDITOR_WF = JSON.parse(text); }
+  catch { msg.className = 'msg err'; msg.textContent = '✗ Could not read JSON.'; return; }
+
+  const r = await api('/api/workflow/analyze', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: text
+  });
+  if (r.error) { msg.className = 'msg err'; msg.textContent = '✗ ' + r.error; return; }
+  EDITOR_MODEL = r;
+  const recog = r.summary.recognized_nodes, total = r.summary.node_count;
+  msg.className = 'msg ok';
+  msg.textContent = `✓ Recognized ${recog} of ${total} nodes.` +
+    (recog < total ? ' Unrecognized nodes are left untouched.' : '');
+  renderEditor(r);
+}
+
+function renderEditor(model) {
+  document.getElementById('edFormCard').classList.remove('hidden');
+  document.getElementById('edCat').textContent = model.summary.category;
+
+  // warnings
+  const w = document.getElementById('edWarnings');
+  w.innerHTML = model.warnings.length
+    ? '<div class="warn-list">⚠️ ' + model.warnings.map(esc).join('<br>⚠️ ') + '</div>' : '';
+
+  // duration
+  const dbox = document.getElementById('edDurationBox');
+  if (model.duration && model.duration.seconds != null) {
+    dbox.classList.remove('hidden');
+    document.getElementById('edDuration').value = model.duration.seconds;
+    updateDurationHint();
+  } else {
+    dbox.classList.add('hidden');
+  }
+
+  // split fields
+  const prompts = model.fields.filter(f => f.role.startsWith('prompt_'));
+  const skip = new Set(['seed_control']);
+  if (model.duration && model.duration.seconds != null) skip.add('video_length');
+  const rest = model.fields.filter(f => !f.role.startsWith('prompt_') && !skip.has(f.role));
+
+  // prompts
+  document.getElementById('edPrompts').innerHTML = prompts.map(f => `
+    <div class="field full">
+      <label>${esc(f.label)}</label>
+      <textarea id="ef-${esc(f.id)}">${esc(f.value)}</textarea>
+    </div>`).join('');
+
+  // main + advanced grids
+  const main = rest.filter(f => f.group === 'main');
+  const adv = rest.filter(f => f.group === 'advanced');
+  document.getElementById('edMain').innerHTML = main.map(renderField).join('');
+  const advEl = document.getElementById('edAdvanced');
+  advEl.innerHTML = adv.map(renderField).join('');
+  document.getElementById('edAdvToggle').classList.toggle('hidden', !adv.length);
+}
+
+function renderField(f) {
+  const id = 'ef-' + f.id;
+  let control;
+  if (f.type === 'combo') {
+    const opts = (f.options || []).slice();
+    if (f.value != null && !opts.includes(f.value)) opts.unshift(f.value);
+    control = `<select id="${id}">` +
+      opts.map(o => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('') + '</select>';
+  } else if (f.type === 'bool') {
+    control = `<label class="chk"><input type="checkbox" id="${id}" ${f.value ? 'checked' : ''}> enabled</label>`;
+  } else if (f.type === 'int' || f.type === 'float') {
+    control = `<input type="number" id="${id}" value="${esc(f.value)}" step="${f.type === 'float' ? 'any' : '1'}">`;
+  } else if (f.type === 'seed') {
+    // seed number + randomize checkbox bound to the sibling seed_control field
+    const sc = EDITOR_MODEL.fields.find(x => x.role === 'seed_control' && x.node_index === f.node_index);
+    const scBox = sc ? `<label class="chk"><input type="checkbox" id="ef-${esc(sc.id)}-chk" ${sc.value === 'randomize' ? 'checked' : ''}> randomize</label>` : '';
+    control = `<div class="seedrow"><input type="number" id="${id}" value="${esc(f.value)}">${scBox}</div>`;
+  } else {
+    control = `<input type="text" id="${id}" value="${esc(f.value)}">`;
+  }
+  return `<div class="field"><label>${esc(f.label)}</label>${control}</div>`;
+}
+
+function updateDurationHint() {
+  const d = EDITOR_MODEL && EDITOR_MODEL.duration;
+  if (!d || d.seconds == null) return;
+  const secs = parseFloat(document.getElementById('edDuration').value) || 0;
+  const frames = Math.max(1, Math.round(secs * d.fps));
+  let txt = `≈ ${frames} frames @ ${d.fps} fps (model base rate)`;
+  if (d.interpolated) txt += ' · this workflow interpolates to a higher playback FPS';
+  document.getElementById('edDurationHint').textContent = txt;
+}
+
+function toggleAdvanced() {
+  const el = document.getElementById('edAdvanced');
+  const btn = document.getElementById('edAdvToggle');
+  const hidden = el.classList.toggle('hidden');
+  btn.textContent = (hidden ? '▸' : '▾') + ' Advanced';
+}
+
+function readField(f) {
+  if (f.role === 'seed_control') return undefined; // handled via the seed checkbox
+  const el = document.getElementById('ef-' + f.id);
+  if (!el) return undefined;
+  if (f.type === 'bool') return el.checked;
+  return el.value;
+}
+
+async function exportWorkflow() {
+  if (!EDITOR_WF || !EDITOR_MODEL) return;
+  const btn = document.getElementById('edExportBtn');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = '...';
+
+  const edits = {};
+  for (const f of EDITOR_MODEL.fields) {
+    const v = readField(f);
+    if (v !== undefined) edits[f.id] = v;
+    // seed randomize checkbox -> write the seed_control field value
+    if (f.type === 'seed') {
+      const sc = EDITOR_MODEL.fields.find(x => x.role === 'seed_control' && x.node_index === f.node_index);
+      const chk = sc && document.getElementById('ef-' + sc.id + '-chk');
+      if (sc && chk) edits[sc.id] = chk.checked ? 'randomize' : 'fixed';
+    }
+  }
+  const body = {workflow: EDITOR_WF, edits};
+  const dbox = document.getElementById('edDurationBox');
+  if (!dbox.classList.contains('hidden')) {
+    body.duration_seconds = parseFloat(document.getElementById('edDuration').value) || 0;
+  }
+
+  const r = await api('/api/workflow/export', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (r.error) { alert('Export failed: ' + r.error); return; }
+
+  const blob = new Blob([JSON.stringify(r.workflow, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = EDITOR_NAME + '_edited.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 loadConfig();
