@@ -429,6 +429,28 @@ def workflow_export():
     return jsonify(workflow=modified, applied=applied)
 
 
+@app.route("/api/workflow/upload-image", methods=["POST"])
+def workflow_upload_image():
+    """Copy a chosen reference image into ComfyUI's input/ folder so the
+    LoadImage node can find it, and return the filename to store in the JSON."""
+    cfg = load_config()
+    path = cfg.get("comfyui_path")
+    if not path or not os.path.isdir(path):
+        return jsonify(error="Set the ComfyUI folder in the Downloader tab first."), 400
+    if "image" not in request.files:
+        return jsonify(error="No image uploaded."), 400
+    f = request.files["image"]
+    name = os.path.basename(f.filename or "")
+    if not name:
+        return jsonify(error="Invalid file name."), 400
+    input_dir = os.path.join(path, "input")
+    os.makedirs(input_dir, exist_ok=True)
+    dest = os.path.join(input_dir, name)
+    f.save(dest)
+    log.info("Saved reference image -> %s", dest)
+    return jsonify(filename=name)
+
+
 if __name__ == "__main__":
     print("ComfyUI Helper running at http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False)

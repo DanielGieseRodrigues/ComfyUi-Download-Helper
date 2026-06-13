@@ -74,7 +74,7 @@
     color: var(--muted); cursor: pointer; transition: border-color .15s;
   }
   .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
   code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
     align-items: flex-start; justify-content: center; padding: 50px 16px; z-index: 50; }
@@ -655,7 +655,13 @@ function renderEditor(model) {
 function renderField(f) {
   const id = 'ef-' + f.id;
   let control;
-  if (f.type === 'combo') {
+  if (f.role === 'reference_image') {
+    control = `<div class="seedrow">
+      <input type="text" id="${id}" value="${esc(f.value)}">
+      <button class="ghost sm" type="button" onclick="document.getElementById('${id}-file').click()">📁 Browse</button>
+      <input type="file" id="${id}-file" accept="image/*" class="hidden" onchange="uploadRefImage('${id}', this)">
+    </div>`;
+  } else if (f.type === 'combo') {
     const opts = (f.options || []).slice();
     if (f.value != null && !opts.includes(f.value)) opts.unshift(f.value);
     control = `<select id="${id}">` +
@@ -673,6 +679,19 @@ function renderField(f) {
     control = `<input type="text" id="${id}" value="${esc(f.value)}">`;
   }
   return `<div class="field"><label>${esc(f.label)}</label>${control}</div>`;
+}
+
+async function uploadRefImage(targetId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const target = document.getElementById(targetId);
+  const prev = target.value;
+  target.value = 'uploading...';
+  const fd = new FormData();
+  fd.append('image', file);
+  const r = await fetch('/api/workflow/upload-image', {method: 'POST', body: fd}).then(x => x.json());
+  if (r.error) { target.value = prev; alert('Upload failed: ' + r.error); return; }
+  target.value = r.filename;  // now lives in ComfyUI/input/, ready for LoadImage
 }
 
 function updateDurationHint() {
