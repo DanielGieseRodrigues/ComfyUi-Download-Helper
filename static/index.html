@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyUI Helper</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #171b22; --panel2: #1f2530; --border: #2a3140;
+    --text: #e6e9ef; --muted: #8b93a3; --accent: #4f8cff; --ok: #2ecc71;
+    --warn: #f5a623; --err: #ff5c5c; --hf: #ffbd45; --civ: #4f8cff; --civred: #ff6b6b; --direct: #8b93a3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+  .step { background: var(--accent); color: #fff; border-radius: 50%; width: 22px;
+    height: 22px; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; }
+  label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+  input[type=text], input[type=password] {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 9px 11px; font-size: 13px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; align-items: flex-end; }
+  .row > div { flex: 1; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 14px; font-size: 13px; cursor: pointer; white-space: nowrap;
+    font-weight: 600;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+  button.link { background: transparent; color: var(--accent); padding: 6px 8px; font-weight: 500; }
+  button.sm { padding: 6px 10px; font-size: 12px; }
+  .field { margin-bottom: 14px; }
+  .field .row { gap: 8px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .msg { font-size: 12px; margin-top: 8px; }
+  .msg.ok { color: var(--ok); } .msg.warn { color: var(--warn); } .msg.err { color: var(--err); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .badge.huggingface { background: rgba(255,189,69,.15); color: var(--hf); }
+  .badge.civitai { background: rgba(79,140,255,.15); color: var(--civ); }
+  .badge.civitai_red { background: rgba(255,107,107,.15); color: var(--civred); }
+  .badge.direct { background: rgba(139,147,163,.15); color: var(--direct); }
+  .badge.opt { background: rgba(245,166,35,.12); color: var(--warn); margin-left: 6px; }
+  .fname { font-family: ui-monospace, Consolas, monospace; }
+  .dir { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.ok { background: var(--ok); } .dot.miss { background: var(--warn); }
+  .dot.down { background: var(--accent); } .dot.err { background: var(--err); }
+  .bar { height: 5px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .actions { display: flex; gap: 8px; align-items: center; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+  .grow { flex: 1; }
+  .drop {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 26px; text-align: center;
+    color: var(--muted); cursor: pointer; transition: border-color .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
+  .hidden { display: none; }
+  code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
+    align-items: flex-start; justify-content: center; padding: 50px 16px; z-index: 50; }
+  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; width: 100%; max-width: 680px; max-height: 80vh; overflow: auto; }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .search-results { display: flex; flex-direction: column; gap: 8px; }
+  .res {
+    display: flex; gap: 10px; align-items: center; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  }
+  .res .info { flex: 1; min-width: 0; }
+  .res .fname { font-size: 13px; }
+  .res .meta { color: var(--muted); font-size: 12px; }
+  .res-status { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧩 ComfyUI Helper</h1>
+  <p class="sub">Sobe um <code>workflow.json</code> e baixa todas as dependencias direto nas pastas certas do ComfyUI.</p>
+
+  <!-- Passo 1: pasta -->
+  <div class="card">
+    <h2><span class="step">1</span> Pasta do ComfyUI</h2>
+    <div class="field">
+      <label>Caminho da instalacao do ComfyUI (a pasta que contem <code>models/</code>)</label>
+      <div class="row">
+        <div><input type="text" id="comfyPath" placeholder="C:\ComfyUI ou C:\ComfyUI_windows_portable\ComfyUI"></div>
+        <button class="ghost" onclick="validatePath()">Validar</button>
+      </div>
+      <div class="msg" id="pathMsg"></div>
+    </div>
+  </div>
+
+  <!-- Passo 2: chaves -->
+  <div class="card">
+    <h2><span class="step">2</span> Chaves de API <span style="color:var(--muted);font-weight:400;font-size:12px;">(opcional, so para modelos restritos)</span></h2>
+    <div class="field">
+      <label>HuggingFace token</label>
+      <div class="row">
+        <div><input type="password" id="hfToken" placeholder="hf_..."></div>
+        <button class="link" onclick="openKey('https://huggingface.co/settings/tokens')">🔑 Obter chave</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Civitai API key</label>
+      <div class="row">
+        <div><input type="password" id="civToken" placeholder="cv_..."></div>
+        <button class="link" onclick="openKey('https://civitai.com/user/account')">🔑 Obter chave</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Civitai.red API key</label>
+      <div class="row">
+        <div><input type="password" id="civRedToken" placeholder="token do civitai.red"></div>
+        <button class="link" onclick="openKey('https://civitai.red/user/account')">🔑 Obter chave</button>
+      </div>
+    </div>
+    <div class="field" style="margin-top:4px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="verifySsl" checked style="width:auto;">
+        Verificar certificado SSL <span style="color:var(--muted);">(desmarque so se der erro de certificado por antivirus/proxy)</span>
+      </label>
+    </div>
+    <button onclick="saveConfig()">Salvar configuracao</button>
+    <span class="msg ok" id="cfgMsg"></span>
+  </div>
+
+  <!-- Passo 3: workflow -->
+  <div class="card">
+    <h2><span class="step">3</span> Workflow</h2>
+    <div class="drop" id="drop">
+      <div>Arraste o <strong>workflow.json</strong> aqui ou clique para escolher</div>
+      <input type="file" id="file" accept=".json" class="hidden">
+    </div>
+    <div class="msg" id="parseMsg"></div>
+  </div>
+
+  <!-- Resultados -->
+  <div class="card hidden" id="resultsCard">
+    <div class="toolbar">
+      <h2 style="margin:0;"><span class="step">4</span> Dependencias</h2>
+      <div class="grow"></div>
+      <button class="ghost sm" onclick="recheckAll()">↻ Re-checar status</button>
+      <button onclick="downloadAll()" id="dlAllBtn">⬇ Baixar tudo o que falta</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Arquivo</th><th>Pasta destino</th><th>Fonte</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <!-- Referenciados sem link -->
+  <div class="card hidden" id="missingCard">
+    <h2 style="margin:0 0 6px;">⚠️ Referenciados sem link</h2>
+    <p class="sub" style="margin:0 0 14px;">O workflow usa estes modelos mas nao traz o link. Use a busca pra achar e baixar.</p>
+    <table>
+      <thead>
+        <tr><th>Arquivo</th><th>Pasta destino</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="missingRows"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal de busca -->
+<div id="searchModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong>🔍 Buscar modelo</strong>
+      <button class="link" onclick="closeSearch()">✕ Fechar</button>
+    </div>
+    <div class="row" style="margin-bottom:10px;">
+      <div><input type="text" id="searchInput" placeholder="nome do modelo"></div>
+      <button onclick="runSearch()">Buscar</button>
+    </div>
+    <div style="display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="src" value="civitai" checked style="width:auto;"> Civitai</label>
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="src" value="civitai_red" checked style="width:auto;"> Civitai.red</label>
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" class="src" value="huggingface" style="width:auto;"> HuggingFace</label>
+      <span id="searchTarget" style="margin-left:auto;"></span>
+    </div>
+    <div id="searchResults" class="search-results"></div>
+  </div>
+</div>
+
+<script>
+let MODELS = [];
+let MISSING = [];
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+// ---------- Config ----------
+async function loadConfig() {
+  const cfg = await api('/api/config');
+  comfyPath.value = cfg.comfyui_path || '';
+  hfToken.value = cfg.hf_token || '';
+  civToken.value = cfg.civitai_token || '';
+  civRedToken.value = cfg.civitai_red_token || '';
+  verifySsl.checked = cfg.verify_ssl !== false;
+}
+
+async function saveConfig() {
+  await api('/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      comfyui_path: comfyPath.value, hf_token: hfToken.value,
+      civitai_token: civToken.value, civitai_red_token: civRedToken.value,
+      verify_ssl: verifySsl.checked
+    })
+  });
+  const m = document.getElementById('cfgMsg');
+  m.textContent = '✓ Salvo'; setTimeout(() => m.textContent = '', 2000);
+}
+
+function openKey(url) { window.open(url, '_blank'); }
+
+async function validatePath() {
+  const msg = document.getElementById('pathMsg');
+  msg.className = 'msg'; msg.textContent = 'Verificando...';
+  const r = await api('/api/validate-path', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: comfyPath.value})
+  });
+  msg.className = 'msg ' + (r.valid ? (r.has_models ? 'ok' : 'warn') : 'err');
+  msg.textContent = (r.valid ? '✓ ' : '✗ ') + r.msg;
+  if (r.valid) saveConfig();
+}
+
+// ---------- Upload / parse ----------
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); };
+
+async function handleFile(file) {
+  const msg = document.getElementById('parseMsg');
+  msg.className = 'msg'; msg.textContent = 'Analisando ' + file.name + '...';
+  const fd = new FormData(); fd.append('file', file);
+  const r = await api('/api/parse', {method: 'POST', body: fd});
+  if (r.error) { msg.className = 'msg err'; msg.textContent = '✗ ' + r.error; return; }
+  MODELS = r.models;
+  MISSING = r.missing || [];
+  if (!MODELS.length && !MISSING.length) { msg.className = 'msg warn'; msg.textContent = 'Nenhuma dependencia encontrada neste workflow.'; return; }
+  msg.className = 'msg ok';
+  msg.textContent = `✓ ${MODELS.length} com link` + (MISSING.length ? `, ${MISSING.length} sem link.` : '.');
+  if (!comfyPath.value) msg.textContent += ' Configure a pasta do ComfyUI para baixar.';
+  renderRows();
+  renderMissing();
+  document.getElementById('resultsCard').classList.toggle('hidden', !MODELS.length);
+  document.getElementById('missingCard').classList.toggle('hidden', !MISSING.length);
+}
+
+function renderMissing() {
+  const tb = document.getElementById('missingRows');
+  tb.innerHTML = '';
+  MISSING.forEach((m, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><div class="fname">${m.name}</div><div class="dir">node: ${m.node_type || '?'}</div></td>
+      <td class="dir">models/${m.directory}/</td>
+      <td id="mst-${i}">${statusHtml(m.status)}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick="recheckMissing(${i})" title="Re-checar">↻</button>
+        <button class="sm" onclick="openSearch('${stem(m.name)}', '${m.directory}')">🔍 Buscar</button>
+      </td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function stem(name) { return (name || '').replace(/\.[^.]+$/, '').replace(/'/g, ''); }
+
+async function recheckMissing(i) {
+  const st = await api('/api/check', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(MISSING[i])
+  });
+  MISSING[i].status = st;
+  document.getElementById('mst-' + i).innerHTML = statusHtml(st);
+}
+
+// ---------- Render ----------
+function renderRows() {
+  const tb = document.getElementById('rows');
+  tb.innerHTML = '';
+  MODELS.forEach((m, i) => {
+    const tr = document.createElement('tr');
+    tr.id = 'row-' + i;
+    tr.innerHTML = `
+      <td>
+        <div class="fname">${m.name}${m.optional ? '<span class="badge opt">opcional</span>' : ''}</div>
+        <a href="${m.url}" target="_blank" class="dir" style="text-decoration:none;">${shortUrl(m.url)}</a>
+      </td>
+      <td class="dir">models/${m.directory}/</td>
+      <td><span class="badge ${m.source}">${sourceLabel(m.source)}</span></td>
+      <td id="st-${i}">${statusHtml(m.status)}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick="recheck(${i})" title="Re-checar status">↻</button>
+        <button class="ghost sm" onclick="openSearch('${stem(m.name)}', '${m.directory}')" title="Buscar em outras fontes">🔍</button>
+        <button class="sm" id="dl-${i}" onclick="downloadOne(${i})">⬇ Baixar</button>
+        <div class="bar hidden" id="bar-${i}"><i></i></div>
+      </td>`;
+    tb.appendChild(tr);
+    syncDownloadBtn(i);
+  });
+}
+
+function shortUrl(u) { try { const p = new URL(u); return p.hostname + p.pathname.split('/').slice(-1)[0].slice(0, 0) + '...' + p.pathname.split('/').pop(); } catch { return u; } }
+function sourceLabel(s) { return {huggingface: 'HuggingFace', civitai: 'Civitai', civitai_red: 'Civitai.red', direct: 'URL direta'}[s] || s; }
+function fmtSize(b) { if (!b) return ''; const u = ['B','KB','MB','GB']; let i = 0; while (b >= 1024 && i < 3) { b /= 1024; i++; } return b.toFixed(1) + ' ' + u[i]; }
+
+function statusHtml(st) {
+  if (st && st.exists) return `<span class="status"><i class="dot ok"></i>Ja existe ${st.size ? '(' + fmtSize(st.size) + ')' : ''}</span>`;
+  if (st && st.reason === 'no_path') return `<span class="status"><i class="dot miss"></i>Configure a pasta</span>`;
+  return `<span class="status"><i class="dot miss"></i>Pendente</span>`;
+}
+
+function syncDownloadBtn(i) {
+  const btn = document.getElementById('dl-' + i);
+  if (!btn) return;
+  const st = MODELS[i].status;
+  if (st && st.exists) { btn.textContent = '✓ Ok'; btn.disabled = true; }
+  else { btn.textContent = '⬇ Baixar'; btn.disabled = false; }
+}
+
+// ---------- Status check ----------
+async function recheck(i) {
+  const st = await api('/api/check', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(MODELS[i])
+  });
+  MODELS[i].status = st;
+  document.getElementById('st-' + i).innerHTML = statusHtml(st);
+  syncDownloadBtn(i);
+}
+async function recheckAll() { for (let i = 0; i < MODELS.length; i++) await recheck(i); }
+
+// ---------- Download ----------
+async function downloadOne(i) {
+  const btn = document.getElementById('dl-' + i);
+  const stCell = document.getElementById('st-' + i);
+  const bar = document.getElementById('bar-' + i);
+  btn.disabled = true; btn.textContent = '...';
+
+  const r = await api('/api/download', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(MODELS[i])
+  });
+  if (r.error) { stCell.innerHTML = `<span class="status"><i class="dot err"></i>${r.error}</span>`; btn.disabled = false; btn.textContent = '⬇ Baixar'; return; }
+  if (r.skipped) { await recheck(i); return; }
+
+  bar.classList.remove('hidden');
+  stCell.innerHTML = `<span class="status"><i class="dot down"></i>Baixando...</span>`;
+  await poll(r.job_id, i, bar, stCell);
+}
+
+function poll(jobId, i, bar, stCell) {
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      const j = await api('/api/progress/' + jobId);
+      if (j.total) bar.querySelector('i').style.width = (100 * j.downloaded / j.total) + '%';
+      if (j.status === 'downloading') {
+        stCell.innerHTML = `<span class="status"><i class="dot down"></i>${fmtSize(j.downloaded)}${j.total ? ' / ' + fmtSize(j.total) : ''}</span>`;
+      } else {
+        clearInterval(t);
+        bar.classList.add('hidden');
+        if (j.status === 'done') { await recheck(i); }
+        else { stCell.innerHTML = `<span class="status"><i class="dot err"></i>Erro: ${j.error || 'falhou'}</span>`;
+               const btn = document.getElementById('dl-' + i); btn.disabled = false; btn.textContent = '↻ Tentar'; }
+        resolve();
+      }
+    }, 600);
+  });
+}
+
+async function downloadAll() {
+  const btn = document.getElementById('dlAllBtn');
+  btn.disabled = true;
+  for (let i = 0; i < MODELS.length; i++) {
+    if (!(MODELS[i].status && MODELS[i].status.exists)) await downloadOne(i);
+  }
+  btn.disabled = false;
+}
+
+// ---------- Busca (modal) ----------
+let SEARCH_TARGET_DIR = '';
+
+function openSearch(query, targetDir) {
+  SEARCH_TARGET_DIR = targetDir || '';
+  document.getElementById('searchInput').value = query || '';
+  document.getElementById('searchTarget').textContent =
+    SEARCH_TARGET_DIR ? 'salvar em: models/' + SEARCH_TARGET_DIR + '/' : '';
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('searchModal').classList.remove('hidden');
+  runSearch();
+}
+function closeSearch() { document.getElementById('searchModal').classList.add('hidden'); }
+
+function selectedSources() {
+  return [...document.querySelectorAll('.src:checked')].map(c => c.value);
+}
+
+async function runSearch() {
+  const box = document.getElementById('searchResults');
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query) { box.innerHTML = '<div class="meta">Digite um nome.</div>'; return; }
+  box.innerHTML = '<div class="meta">Buscando...</div>';
+  const r = await api('/api/search', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query, sources: selectedSources()})
+  });
+  const results = r.results || [];
+  if (!results.length) { box.innerHTML = '<div class="meta">Nada encontrado nas fontes selecionadas.</div>'; return; }
+  box.innerHTML = '';
+  results.forEach((res, i) => {
+    const dir = SEARCH_TARGET_DIR || res.directory;
+    const div = document.createElement('div');
+    div.className = 'res';
+    div.innerHTML = `
+      <div class="info">
+        <div class="fname">${res.filename || '(sem nome)'} <span class="badge ${res.source}">${sourceLabel(res.source)}</span></div>
+        <div class="meta">${res.model_name || ''}${res.model_type ? ' · ' + res.model_type : ''}${res.size_kb ? ' · ' + fmtSize(res.size_kb * 1024) : ''} → models/${dir}/</div>
+      </div>
+      <span class="res-status" id="res-st-${i}"></span>
+      <button class="sm" id="res-dl-${i}">⬇ Baixar</button>`;
+    box.appendChild(div);
+    document.getElementById('res-dl-' + i).onclick = () => downloadResult(res, dir, i);
+  });
+}
+
+async function downloadResult(res, dir, i) {
+  const btn = document.getElementById('res-dl-' + i);
+  const st = document.getElementById('res-st-' + i);
+  btn.disabled = true; st.textContent = 'iniciando...';
+  const item = {name: res.filename, directory: dir, url: res.url};
+  const r = await api('/api/download', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(item)
+  });
+  if (r.error) { st.textContent = '✗ ' + r.error; btn.disabled = false; return; }
+  if (r.skipped) { st.textContent = '✓ ja existe'; btn.textContent = '✓ Ok'; return; }
+  const timer = setInterval(async () => {
+    const j = await api('/api/progress/' + r.job_id);
+    if (j.status === 'downloading') st.textContent = fmtSize(j.downloaded) + (j.total ? ' / ' + fmtSize(j.total) : '');
+    else {
+      clearInterval(timer);
+      if (j.status === 'done') { st.textContent = '✓ baixado'; btn.textContent = '✓ Ok'; }
+      else { st.textContent = '✗ ' + (j.error || 'erro'); btn.disabled = false; }
+    }
+  }, 600);
+}
+
+loadConfig();
+</script>
+</body>
+</html>
