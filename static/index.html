@@ -96,6 +96,15 @@
     border-radius: 0; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .help { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+    border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 11px; font-weight: 700;
+    cursor: help; position: relative; margin: 0 0 6px 4px; align-self: center; }
+  .help:hover { color: var(--accent); border-color: var(--accent); }
+  .help .tip { display: none; position: absolute; top: 150%; left: 0; width: 280px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; font-weight: 400; color: var(--text); line-height: 1.5; text-align: left;
+    z-index: 60; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  .help:hover .tip { display: block; }
   .duration-box { background: linear-gradient(180deg, rgba(79,140,255,.10), var(--panel2));
     border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
   .duration-box h3 { margin: 0 0 10px; font-size: 14px; }
@@ -128,6 +137,7 @@
   <div class="tabs">
     <button class="tab active" id="tabBtn-downloader" onclick="switchTab('downloader')">📥 Model downloader</button>
     <button class="tab" id="tabBtn-editor" onclick="switchTab('editor')">🎛️ Workflow editor</button>
+    <span class="help" tabindex="0">?<span class="tip">Makes editing complex workflows easier: upload a <code>workflow.json</code> and tweak the parts that matter — prompts, video duration, size, seed and more — in a simple form, then export an updated workflow.json. Handy when a workflow has dozens of nodes.</span></span>
   </div>
 
   <!-- ===================== TAB: DOWNLOADER ===================== -->
