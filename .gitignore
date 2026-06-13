@@ -7,3 +7,4 @@ helper.log
 *.run.log
 workflowsExamples/
 workflowstest/
+metadata/model-list.cache.json

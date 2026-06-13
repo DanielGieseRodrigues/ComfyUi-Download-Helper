@@ -58,6 +58,8 @@
   .badge.civitai_red { background: rgba(255,107,107,.15); color: var(--civred); }
   .badge.direct { background: rgba(139,147,163,.15); color: var(--direct); }
   .badge.opt { background: rgba(245,166,35,.12); color: var(--warn); margin-left: 6px; }
+  .badge.curated { background: rgba(46,204,113,.15); color: var(--ok); margin-left: 6px; }
+  .badge.registry { background: rgba(46,204,113,.15); color: var(--ok); }
   .fname { font-family: ui-monospace, Consolas, monospace; }
   .dir { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
   .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
@@ -91,6 +93,21 @@
   .res .fname { font-size: 13px; }
   .res .meta { color: var(--muted); font-size: 12px; }
   .res-status { font-size: 12px; color: var(--muted); }
+  /* Downloads tray (fixed, always visible across tabs/modal) */
+  #dlTray { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 32px);
+    z-index: 60; display: flex; flex-direction: column; gap: 8px; }
+  #dlTray.hidden { display: none; }
+  .dl-tray-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  .dl-tray-head .grow { flex: 1; }
+  .dl-tray-head .link { font-size: 12px; }
+  .dl-item { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .dl-item .dl-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dl-item .dl-sub { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 6px; }
+  .dl-item .dl-sub .grow { flex: 1; }
+  .dl-item .bar { margin-top: 8px; }
+  .dl-item.done .dl-name { color: var(--ok, #3fb950); }
+  .dl-item.err .dl-name { color: var(--err, #f85149); }
   .tabs { display: flex; gap: 6px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
   .tab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
     border-radius: 0; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
@@ -286,7 +303,10 @@
   <div class="modal-box">
     <div class="modal-head">
       <strong>🔍 Search model</strong>
-      <button class="link" onclick="closeSearch()">✕ Close</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="link" onclick="refreshRegistry()" id="refreshCatBtn" title="Update the curated model catalog from ComfyUI-Manager">🔄 Update catalog</button>
+        <button class="link" onclick="closeSearch()">✕ Close</button>
+      </div>
     </div>
     <div class="row" style="margin-bottom:10px;">
       <div><input type="text" id="searchInput" placeholder="model name"></div>
@@ -299,7 +319,40 @@
       <span id="searchTarget" style="margin-left:auto;"></span>
     </div>
     <div id="searchResults" class="search-results"></div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
+      <strong style="font-size:13px;">📋 Can't find it? Paste a download link</strong>
+      <div class="hint" style="margin-top:4px;">For direct HuggingFace / Civitai / any direct download URL.</div>
+      <div class="field-grid" style="margin-top:10px;">
+        <div class="full">
+          <label>Download URL</label>
+          <input type="text" id="manualUrl" placeholder="https://...">
+        </div>
+        <div>
+          <label>File name (saved as)</label>
+          <input type="text" id="manualName" placeholder="model.safetensors">
+        </div>
+        <div>
+          <label>Target folder (models/…)</label>
+          <input type="text" id="manualDir" placeholder="checkpoints">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center;">
+        <button class="sm" onclick="downloadManual()">⬇ Download</button>
+        <span class="msg" id="manualMsg" style="margin:0;"></span>
+      </div>
+    </div>
   </div>
+</div>
+
+<!-- Downloads tray (always visible, survives closing the modal / switching tabs) -->
+<div id="dlTray" class="hidden">
+  <div class="dl-tray-head">
+    <strong>⬇ Downloads</strong>
+    <span class="grow"></span>
+    <button class="link" onclick="clearFinishedDownloads()">Clear finished</button>
+  </div>
+  <div id="dlTrayItems"></div>
 </div>
 
 <script>
@@ -387,9 +440,60 @@ function renderMissing() {
       <td class="actions">
         <button class="ghost sm" onclick="recheckMissing(${i})" title="Re-check">↻</button>
         <button class="sm" onclick="openSearch('${stem(m.name)}', '${m.directory}')">🔍 Search</button>
+        <button class="ghost sm" onclick="togglePaste(${i})" title="Paste a download link manually">📋 Paste link</button>
       </td>`;
     tb.appendChild(tr);
+    // Hidden second row with the manual-link input.
+    const pr = document.createElement('tr');
+    pr.id = 'paste-row-' + i;
+    pr.className = 'hidden';
+    pr.innerHTML = `
+      <td colspan="4">
+        <div class="row" style="gap:8px;">
+          <div><input type="text" id="paste-url-${i}" placeholder="Paste a direct download link (HuggingFace / Civitai / direct URL)"></div>
+          <button class="sm" id="paste-dl-${i}" onclick="downloadPasted(${i})">⬇ Download</button>
+        </div>
+        <div class="msg" id="paste-st-${i}"></div>
+      </td>`;
+    tb.appendChild(pr);
   });
+}
+
+function togglePaste(i) {
+  const row = document.getElementById('paste-row-' + i);
+  row.classList.toggle('hidden');
+  if (!row.classList.contains('hidden')) document.getElementById('paste-url-' + i).focus();
+}
+
+async function downloadPasted(i) {
+  const url = document.getElementById('paste-url-' + i).value.trim();
+  const st = document.getElementById('paste-st-' + i);
+  const btn = document.getElementById('paste-dl-' + i);
+  if (!url) { st.className = 'msg err'; st.textContent = 'Paste a link first.'; return; }
+  btn.disabled = true; st.className = 'msg'; st.textContent = 'Starting...';
+  const item = {name: MISSING[i].name, directory: MISSING[i].directory, url};
+  const r = await api('/api/download', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(item)
+  });
+  if (r.error) { st.className = 'msg err'; st.textContent = '✗ ' + r.error; btn.disabled = false; return; }
+  if (r.skipped) { st.className = 'msg ok'; st.textContent = '✓ already exists'; btn.disabled = false; await recheckMissing(i); return; }
+  const timer = setInterval(async () => {
+    const j = await api('/api/progress/' + r.job_id);
+    if (j.status === 'downloading') {
+      st.className = 'msg';
+      st.textContent = fmtSize(j.downloaded) + (j.total ? ' / ' + fmtSize(j.total) : '');
+    } else {
+      clearInterval(timer);
+      if (j.status === 'done') {
+        st.className = 'msg ok'; st.textContent = '✓ downloaded';
+        await recheckMissing(i);
+      } else {
+        st.className = 'msg err'; st.textContent = '✗ ' + (j.error || 'error');
+      }
+      btn.disabled = false;
+    }
+  }, 600);
 }
 
 function stem(name) { return (name || '').replace(/\.[^.]+$/, '').replace(/'/g, ''); }
@@ -497,6 +601,77 @@ function poll(jobId, i, bar, stCell) {
   });
 }
 
+// ---------- Global downloads tray ----------
+// Downloads run server-side in a background thread, so they keep going even if
+// the search modal is closed. This tray gives them a home on the main screen.
+const DL_JOBS = {};   // jobId -> {label, dir, downloaded, total, status, error, onDone}
+let DL_POLLER = null;
+
+function trackDownload(jobId, label, dir, onDone) {
+  DL_JOBS[jobId] = {label, dir: dir || '', downloaded: 0, total: 0,
+                    status: 'downloading', error: '', onDone: onDone || null};
+  renderTray();
+  ensureTrayPoller();
+}
+
+function ensureTrayPoller() {
+  if (DL_POLLER) return;
+  DL_POLLER = setInterval(async () => {
+    const active = Object.keys(DL_JOBS).filter(id => DL_JOBS[id].status === 'downloading');
+    if (!active.length) { clearInterval(DL_POLLER); DL_POLLER = null; return; }
+    for (const id of active) {
+      let j;
+      try { j = await api('/api/progress/' + id); } catch { continue; }
+      const e = DL_JOBS[id];
+      if (!e) continue;
+      e.downloaded = j.downloaded || 0;
+      e.total = j.total || 0;
+      if (j.status !== 'downloading') {
+        e.status = j.status;
+        e.error = j.error || '';
+        if (e.onDone) { try { e.onDone(j); } catch (err) {} }
+      }
+    }
+    renderTray();
+  }, 600);
+}
+
+function renderTray() {
+  const tray = document.getElementById('dlTray');
+  const box = document.getElementById('dlTrayItems');
+  const ids = Object.keys(DL_JOBS);
+  if (!ids.length) { tray.classList.add('hidden'); box.innerHTML = ''; return; }
+  tray.classList.remove('hidden');
+  box.innerHTML = ids.map(id => {
+    const e = DL_JOBS[id];
+    const pct = e.total ? Math.round(100 * e.downloaded / e.total) : 0;
+    const cls = e.status === 'done' ? 'done' : (e.status === 'downloading' ? '' : 'err');
+    let sub;
+    if (e.status === 'done') sub = '✓ saved to models/' + e.dir + '/';
+    else if (e.status === 'downloading') sub = fmtSize(e.downloaded) + (e.total ? ' / ' + fmtSize(e.total) + ' (' + pct + '%)' : ' downloading...');
+    else sub = '✗ ' + (e.error || 'failed');
+    const bar = e.status === 'downloading' ? `<div class="bar"><i style="width:${pct}%"></i></div>` : '';
+    return `<div class="dl-item ${cls}">
+      <div class="dl-name" title="${e.label}">${e.label}</div>
+      <div class="dl-sub"><span>${sub}</span></div>
+      ${bar}
+    </div>`;
+  }).join('');
+}
+
+function clearFinishedDownloads() {
+  for (const id of Object.keys(DL_JOBS)) {
+    if (DL_JOBS[id].status !== 'downloading') delete DL_JOBS[id];
+  }
+  renderTray();
+}
+
+// Refresh statuses of any rows on the main screen after a tray download finishes.
+function refreshMainStatuses() {
+  if (MODELS.length) recheckAll();
+  for (let i = 0; i < MISSING.length; i++) recheckMissing(i);
+}
+
 async function downloadAll() {
   const btn = document.getElementById('dlAllBtn');
   btn.disabled = true;
@@ -515,10 +690,45 @@ function openSearch(query, targetDir) {
   document.getElementById('searchTarget').textContent =
     SEARCH_TARGET_DIR ? 'save to: models/' + SEARCH_TARGET_DIR + '/' : '';
   document.getElementById('searchResults').innerHTML = '';
+  // Prefill the manual-link fields with what we already know.
+  document.getElementById('manualUrl').value = '';
+  document.getElementById('manualName').value = query || '';
+  document.getElementById('manualDir').value = SEARCH_TARGET_DIR || 'checkpoints';
+  document.getElementById('manualMsg').textContent = '';
   document.getElementById('searchModal').classList.remove('hidden');
   runSearch();
 }
+
+async function downloadManual() {
+  const url = document.getElementById('manualUrl').value.trim();
+  const name = document.getElementById('manualName').value.trim();
+  const dir = document.getElementById('manualDir').value.trim() || 'checkpoints';
+  const msg = document.getElementById('manualMsg');
+  if (!url) { msg.className = 'msg err'; msg.textContent = 'Paste a link first.'; return; }
+  if (!name) { msg.className = 'msg err'; msg.textContent = 'Enter a file name.'; return; }
+  msg.className = 'msg'; msg.textContent = 'Starting...';
+  const r = await api('/api/download', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, directory: dir, url})
+  });
+  if (r.error) { msg.className = 'msg err'; msg.textContent = '✗ ' + r.error; return; }
+  if (r.skipped) { msg.className = 'msg ok'; msg.textContent = '✓ already exists'; return; }
+  // Hand off to the tray — you can close this window and watch it on the main screen.
+  msg.className = 'msg ok';
+  msg.textContent = '✓ downloading in background — you can close this window';
+  trackDownload(r.job_id, name, dir, refreshMainStatuses);
+}
 function closeSearch() { document.getElementById('searchModal').classList.add('hidden'); }
+
+async function refreshRegistry() {
+  const btn = document.getElementById('refreshCatBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '🔄 Updating...';
+  const r = await api('/api/registry/refresh', {method: 'POST'});
+  btn.textContent = (r.ok ? '✓ ' : '✗ ') + (r.msg || '');
+  setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
+  if (r.ok) runSearch();
+}
 
 function selectedSources() {
   return [...document.querySelectorAll('.src:checked')].map(c => c.value);
@@ -538,12 +748,14 @@ async function runSearch() {
   box.innerHTML = '';
   results.forEach((res, i) => {
     const dir = SEARCH_TARGET_DIR || res.directory;
+    const size = res.size_kb ? fmtSize(res.size_kb * 1024) : (res.size_text || '');
+    const curated = res.registry ? '<span class="badge curated">✓ curated</span>' : '';
     const div = document.createElement('div');
     div.className = 'res';
     div.innerHTML = `
       <div class="info">
-        <div class="fname">${res.filename || '(no name)'} <span class="badge ${res.source}">${sourceLabel(res.source)}</span></div>
-        <div class="meta">${res.model_name || ''}${res.model_type ? ' · ' + res.model_type : ''}${res.size_kb ? ' · ' + fmtSize(res.size_kb * 1024) : ''} → models/${dir}/</div>
+        <div class="fname">${res.filename || '(no name)'} <span class="badge ${res.source}">${sourceLabel(res.source)}</span>${curated}</div>
+        <div class="meta">${res.model_name || ''}${res.model_type ? ' · ' + res.model_type : ''}${size ? ' · ' + size : ''} → models/${dir}/</div>
       </div>
       <span class="res-status" id="res-st-${i}"></span>
       <button class="sm" id="res-dl-${i}">⬇ Download</button>`;
@@ -563,15 +775,11 @@ async function downloadResult(res, dir, i) {
   });
   if (r.error) { st.textContent = '✗ ' + r.error; btn.disabled = false; return; }
   if (r.skipped) { st.textContent = '✓ already exists'; btn.textContent = '✓ Ok'; return; }
-  const timer = setInterval(async () => {
-    const j = await api('/api/progress/' + r.job_id);
-    if (j.status === 'downloading') st.textContent = fmtSize(j.downloaded) + (j.total ? ' / ' + fmtSize(j.total) : '');
-    else {
-      clearInterval(timer);
-      if (j.status === 'done') { st.textContent = '✓ downloaded'; btn.textContent = '✓ Ok'; }
-      else { st.textContent = '✗ ' + (j.error || 'error'); btn.disabled = false; }
-    }
-  }, 600);
+  // Hand off to the tray: progress now shows on the main screen and keeps going
+  // even after this modal is closed.
+  st.textContent = '✓ downloading in background';
+  btn.textContent = '✓ Started';
+  trackDownload(r.job_id, res.filename, dir, refreshMainStatuses);
 }
 
 // ---------- Tabs ----------

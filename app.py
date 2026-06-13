@@ -16,8 +16,21 @@ import uuid
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
+import model_registry
 import workflow_editor
 from workflow_parser import MODEL_EXTS, extract_referenced, parse_workflow
+
+# Generic filenames that exist in almost every HF repo and tell us nothing about
+# the model the user is after — skip them so they don't drown the results.
+HF_SKIP_FILENAMES = {
+    "pytorch_model.bin", "adapter_model.bin", "diffusion_pytorch_model.bin",
+    "model.safetensors", "model.fp16.safetensors", "model.bin", "model.ckpt",
+    "model.pt", "config.json", "tokenizer.json", "optimizer.pt",
+    "training_args.bin", "diffusion_pytorch_model.safetensors",
+}
+
+# Minimum relevance (model_registry.score, 0..1000) for a result to be shown.
+SEARCH_MIN_SCORE = 200
 
 # Civitai model type -> ComfyUI subfolder.
 CIVITAI_TYPE_DIR = {
@@ -193,14 +206,21 @@ def parse():
 # --------------------------------------------------------------------------- #
 # Search by name (when there is no link or the download failed)
 # --------------------------------------------------------------------------- #
+def _rel_score(query, filename, model_name="", base=""):
+    """Relevance of an API result for the query (reuses the registry scorer)."""
+    return model_registry.score(
+        query, {"filename": filename or "", "name": model_name or "", "base": base or ""})
+
+
 def _search_civitai(base, query, token, source, verify):
     headers = {"User-Agent": "comfyui-helper"}
     if token:
         headers["Authorization"] = "Bearer " + token
+    clean = model_registry.strip_quant(query) or query
     out = []
     try:
         r = requests.get(f"{base}/api/v1/models",
-                         params={"query": query, "limit": 8},
+                         params={"query": clean, "limit": 10, "sort": "Most Downloaded"},
                          headers=headers, timeout=30, verify=verify)
         r.raise_for_status()
         data = r.json()
@@ -210,21 +230,34 @@ def _search_civitai(base, query, token, source, verify):
     for item in data.get("items", []):
         mtype = item.get("type", "")
         directory = CIVITAI_TYPE_DIR.get(mtype, "checkpoints")
+        model_name = item.get("name", "")
+        added = 0
         for ver in item.get("modelVersions", []):
-            for f in ver.get("files", []):
-                url = f.get("downloadUrl")
-                if not url:
-                    continue
-                out.append({
-                    "filename": f.get("name"),
-                    "model_name": item.get("name"),
-                    "version": ver.get("name"),
-                    "model_type": mtype,
-                    "directory": directory,
-                    "source": source,
-                    "url": url,
-                    "size_kb": f.get("sizeKB"),
-                })
+            files = ver.get("files", [])
+            # Only the actual model weight (primary / type=="Model"), not the
+            # config/VAE/training-data extras Civitai bundles into a version.
+            primary = next((f for f in files if f.get("primary")), None)
+            chosen = primary or next((f for f in files if f.get("type") == "Model"), None)
+            if not chosen:
+                continue
+            url = chosen.get("downloadUrl")
+            if not url:
+                continue
+            fn = chosen.get("name") or ""
+            out.append({
+                "filename": fn,
+                "model_name": model_name,
+                "version": ver.get("name"),
+                "model_type": mtype,
+                "directory": directory,
+                "source": source,
+                "url": url,
+                "size_kb": chosen.get("sizeKB"),
+                "score": _rel_score(query, fn, model_name, model_name),
+            })
+            added += 1
+            if added >= 3:  # cap versions per model so one model can't flood results
+                break
     return out
 
 
@@ -232,17 +265,21 @@ def _search_huggingface(query, token, verify):
     headers = {"User-Agent": "comfyui-helper"}
     if token:
         headers["Authorization"] = "Bearer " + token
+    clean = model_registry.strip_quant(query) or query
     out = []
     try:
+        # Sort by downloads: the community-validated repos float to the top,
+        # which is most of what makes a Google search land on the right link.
         r = requests.get("https://huggingface.co/api/models",
-                         params={"search": query, "limit": 5},
+                         params={"search": clean, "limit": 10,
+                                 "sort": "downloads", "direction": -1},
                          headers=headers, timeout=30, verify=verify)
         r.raise_for_status()
         repos = r.json()
     except Exception as exc:  # noqa: BLE001
         log.warning("Search on HuggingFace failed: %s", exc)
         return out
-    for repo in repos[:5]:
+    for repo in repos[:6]:
         repo_id = repo.get("id") or repo.get("modelId")
         if not repo_id:
             continue
@@ -252,21 +289,33 @@ def _search_huggingface(query, token, verify):
             siblings = d.get("siblings", [])
         except Exception:  # noqa: BLE001
             siblings = []
+        # Score every weight file in the repo, then keep only the few best ones
+        # so a repo with dozens of shards doesn't dump junk into the results.
+        scored = []
         for s in siblings:
-            fn = s.get("rfilename", "")
-            if fn.lower().endswith(MODEL_EXTS):
-                out.append({
-                    "filename": fn.split("/")[-1],
-                    "model_name": repo_id,
-                    "version": "",
-                    "model_type": "",
-                    "directory": "checkpoints",
-                    "source": "huggingface",
-                    "url": f"https://huggingface.co/{repo_id}/resolve/main/{fn}",
-                    "size_kb": None,
-                })
-                if len(out) >= 40:
-                    return out
+            path = s.get("rfilename", "")
+            fn = path.split("/")[-1]
+            if not fn.lower().endswith(MODEL_EXTS) or fn.lower() in HF_SKIP_FILENAMES:
+                continue
+            sc = _rel_score(query, fn, repo_id)
+            scored.append((sc, fn, path))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        for sc, fn, path in scored[:4]:
+            if sc < SEARCH_MIN_SCORE:
+                continue
+            out.append({
+                "filename": fn,
+                "model_name": repo_id,
+                "version": "",
+                "model_type": "",
+                "directory": "checkpoints",
+                "source": "huggingface",
+                "url": f"https://huggingface.co/{repo_id}/resolve/main/{path}",
+                "size_kb": None,
+                "score": sc,
+            })
+        if len(out) >= 40:
+            break
     return out
 
 
@@ -280,7 +329,17 @@ def search():
     cfg = load_config()
     verify = cfg.get("verify_ssl", True)
     log.info("Search for '%s' on %s", query, sources)
+
     results = []
+
+    # 1) Curated catalog first — exact name -> exact URL for well-known models.
+    #    Always consulted; it's the highest-quality layer and needs no network.
+    registry_hits = model_registry.search(query)
+    for r in registry_hits:
+        r["source"] = detect_source(r["url"])  # real provider for the badge/token
+    results += registry_hits
+
+    # 2) Live APIs as a supplement for anything the catalog doesn't know.
     if "civitai" in sources:
         results += _search_civitai("https://civitai.com", query,
                                     cfg.get("civitai_token"), "civitai", verify)
@@ -289,7 +348,32 @@ def search():
                                    cfg.get("civitai_red_token"), "civitai_red", verify)
     if "huggingface" in sources:
         results += _search_huggingface(query, cfg.get("hf_token"), verify)
-    return jsonify(results=results)
+
+    # Make sure every result has a score, dedupe by URL (keeping the best),
+    # drop low-relevance noise, and sort best-first.
+    for r in results:
+        r.setdefault("score", _rel_score(query, r.get("filename"),
+                                         r.get("model_name"), r.get("version")))
+    best = {}
+    for r in results:
+        key = (r.get("url") or "").split("?")[0].lower()
+        if not key:
+            continue
+        if key not in best or r["score"] > best[key]["score"]:
+            # Preserve the curated flag if either copy of the URL had it.
+            if best.get(key, {}).get("registry"):
+                r["registry"] = True
+            best[key] = r
+    merged = [r for r in best.values() if r["score"] >= SEARCH_MIN_SCORE]
+    merged.sort(key=lambda x: x["score"], reverse=True)
+    return jsonify(results=merged[:40])
+
+
+@app.route("/api/registry/refresh", methods=["POST"])
+def registry_refresh():
+    cfg = load_config()
+    ok, msg = model_registry.refresh_from_upstream(verify=cfg.get("verify_ssl", True))
+    return jsonify(ok=ok, msg=msg)
 
 
 @app.route("/api/check", methods=["POST"])
