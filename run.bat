@@ -8,6 +8,9 @@ if not exist .venv (
 
 call .venv\Scripts\activate.bat
 
+echo Encerrando instancias antigas na porta 5000...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5000 " ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+
 echo Instalando dependencias...
 python -m pip install --quiet --upgrade pip
 python -m pip install --quiet -r requirements.txt
