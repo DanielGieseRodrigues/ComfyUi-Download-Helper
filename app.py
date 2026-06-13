@@ -1,10 +1,10 @@
-"""ComfyUI Helper - servidor local.
+"""ComfyUI Helper - local server.
 
-Sobe uma pagina web simples para:
-  - mapear a pasta do ComfyUI
-  - guardar tokens (HuggingFace / Civitai)
-  - subir um workflow.json, listar as dependencias e baixar tudo
-    automaticamente nas pastas certas (models/<directory>/<name>).
+Serves a simple web page to:
+  - map the ComfyUI folder
+  - store tokens (HuggingFace / Civitai)
+  - upload a workflow.json, list its dependencies and download everything
+    automatically into the right folders (models/<directory>/<name>).
 """
 
 import json
@@ -18,7 +18,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from workflow_parser import MODEL_EXTS, extract_referenced, parse_workflow
 
-# Tipo de modelo no Civitai -> subpasta do ComfyUI.
+# Civitai model type -> ComfyUI subfolder.
 CIVITAI_TYPE_DIR = {
     "Checkpoint": "checkpoints",
     "LORA": "loras",
@@ -35,8 +35,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 LOG_PATH = os.path.join(BASE, "helper.log")
 
-# Defaults da config. Inclui verify_ssl: por padrao validamos certificados,
-# mas o usuario pode desligar caso o ambiente (antivirus/proxy) impeca.
+# Config defaults. Includes verify_ssl: by default we validate certificates,
+# but the user can turn it off if the environment (antivirus/proxy) blocks it.
 DEFAULT_CONFIG = {
     "comfyui_path": "",
     "hf_token": "",
@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
 }
 
 # ---------------------------------------------------------------------------
-# Logging para arquivo + console (ajuda a diagnosticar falhas de download)
+# Logging to file + console (helps diagnose download failures)
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -58,18 +58,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("comfyui-helper")
 
-# Usa a loja de certificados do Windows (resolve a maioria dos erros de SSL
-# causados por antivirus/proxy que injetam um certificado raiz proprio).
+# Uses the Windows certificate store (fixes most SSL errors caused by
+# antivirus/proxy software that injects its own root certificate).
 try:
     import truststore
     truststore.inject_into_ssl()
-    log.info("truststore ativo: usando os certificados do sistema operacional.")
+    log.info("truststore active: using the operating system certificates.")
 except Exception as exc:  # noqa: BLE001
-    log.warning("truststore indisponivel (%s); usando certificados do certifi.", exc)
+    log.warning("truststore unavailable (%s); falling back to certifi certificates.", exc)
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
-# Jobs de download em andamento: job_id -> {name, downloaded, total, status, error}
+# In-progress download jobs: job_id -> {name, downloaded, total, status, error}
 jobs = {}
 jobs_lock = threading.Lock()
 
@@ -125,7 +125,7 @@ def check_status(cfg, item):
 
 
 # --------------------------------------------------------------------------- #
-# Rotas estaticas
+# Static routes
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
@@ -156,10 +156,10 @@ def validate_path():
     data = request.get_json(force=True) or {}
     path = (data.get("path") or "").strip()
     if not path or not os.path.isdir(path):
-        return jsonify(valid=False, msg="Pasta nao encontrada.")
+        return jsonify(valid=False, msg="Folder not found.")
     has_models = os.path.isdir(os.path.join(path, "models"))
-    msg = "OK - pasta valida." if has_models else \
-        "A pasta existe, mas nao tem subpasta 'models'. As pastas serao criadas no download."
+    msg = "OK - valid folder." if has_models else \
+        "The folder exists but has no 'models' subfolder. The folders will be created on download."
     return jsonify(valid=True, has_models=has_models, msg=msg)
 
 
@@ -171,7 +171,7 @@ def parse():
         else:
             data = request.get_json(force=True)
     except (json.JSONDecodeError, ValueError):
-        return jsonify(error="JSON invalido."), 400
+        return jsonify(error="Invalid JSON."), 400
 
     cfg = load_config()
     models = parse_workflow(data)
@@ -179,7 +179,7 @@ def parse():
         m["source"] = detect_source(m["url"])
         m["status"] = check_status(cfg, m)
 
-    # Modelos citados no workflow que NAO tem link de download.
+    # Models referenced in the workflow that do NOT have a download link.
     have = {m["name"].lower() for m in models}
     missing = [r for r in extract_referenced(data) if r["name"].lower() not in have]
     for r in missing:
@@ -190,7 +190,7 @@ def parse():
 
 
 # --------------------------------------------------------------------------- #
-# Busca por nome (quando nao ha link ou o download falhou)
+# Search by name (when there is no link or the download failed)
 # --------------------------------------------------------------------------- #
 def _search_civitai(base, query, token, source, verify):
     headers = {"User-Agent": "comfyui-helper"}
@@ -204,7 +204,7 @@ def _search_civitai(base, query, token, source, verify):
         r.raise_for_status()
         data = r.json()
     except Exception as exc:  # noqa: BLE001
-        log.warning("Busca em %s falhou: %s", source, exc)
+        log.warning("Search on %s failed: %s", source, exc)
         return out
     for item in data.get("items", []):
         mtype = item.get("type", "")
@@ -239,7 +239,7 @@ def _search_huggingface(query, token, verify):
         r.raise_for_status()
         repos = r.json()
     except Exception as exc:  # noqa: BLE001
-        log.warning("Busca em HuggingFace falhou: %s", exc)
+        log.warning("Search on HuggingFace failed: %s", exc)
         return out
     for repo in repos[:5]:
         repo_id = repo.get("id") or repo.get("modelId")
@@ -278,7 +278,7 @@ def search():
         return jsonify(results=[])
     cfg = load_config()
     verify = cfg.get("verify_ssl", True)
-    log.info("Busca por '%s' em %s", query, sources)
+    log.info("Search for '%s' on %s", query, sources)
     results = []
     if "civitai" in sources:
         results += _search_civitai("https://civitai.com", query,
@@ -316,7 +316,7 @@ def do_download(job_id, cfg, item):
     tmp = dest + ".part"
     verify = cfg.get("verify_ssl", True)
 
-    log.info("Baixando %s (%s) de %s [verify_ssl=%s]",
+    log.info("Downloading %s (%s) from %s [verify_ssl=%s]",
              item["name"], source, url.split("?")[0], verify)
 
     try:
@@ -340,14 +340,14 @@ def do_download(job_id, cfg, item):
             jobs[job_id]["status"] = "done"
         log.info("OK: %s (%d bytes) -> %s", item["name"], downloaded, dest)
     except requests.exceptions.SSLError as exc:
-        msg = ("Erro de SSL/certificado. Tente: deixar o truststore ativo, ou "
-               "marcar 'Ignorar verificacao SSL' nas configuracoes. Detalhe: "
+        msg = ("SSL/certificate error. Try: keeping truststore active, or "
+               "ticking 'Skip SSL verification' in the settings. Detail: "
                + str(exc))
         _fail_job(job_id, tmp, msg)
-        log.error("SSL falhou em %s: %s", item["name"], exc)
-    except Exception as exc:  # noqa: BLE001 - reportar qualquer falha de rede/IO
+        log.error("SSL failed on %s: %s", item["name"], exc)
+    except Exception as exc:  # noqa: BLE001 - report any network/IO failure
         _fail_job(job_id, tmp, str(exc))
-        log.error("Falha em %s: %s", item["name"], exc)
+        log.error("Failure on %s: %s", item["name"], exc)
 
 
 def _fail_job(job_id, tmp, message):
@@ -365,7 +365,7 @@ def _fail_job(job_id, tmp, message):
 def download():
     cfg = load_config()
     if not cfg.get("comfyui_path"):
-        return jsonify(error="Configure a pasta do ComfyUI primeiro."), 400
+        return jsonify(error="Configure the ComfyUI folder first."), 400
 
     item = request.get_json(force=True) or {}
     status = check_status(cfg, item)
@@ -390,10 +390,10 @@ def progress(job_id):
     with jobs_lock:
         job = jobs.get(job_id)
         if not job:
-            return jsonify(error="job nao encontrado"), 404
+            return jsonify(error="job not found"), 404
         return jsonify(dict(job))
 
 
 if __name__ == "__main__":
-    print("ComfyUI Helper rodando em http://127.0.0.1:5000")
+    print("ComfyUI Helper running at http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False)

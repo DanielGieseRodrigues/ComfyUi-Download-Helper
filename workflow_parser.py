@@ -1,11 +1,11 @@
-"""Extrai a lista de modelos/dependencias de um workflow.json do ComfyUI.
+"""Extract the list of models/dependencies from a ComfyUI workflow.json.
 
-Duas fontes sao usadas:
-  1. As listas `properties.models[]` dentro de cada node (fonte confiavel: traz
-     directory + name + url). Os nodes podem estar na raiz ou dentro de
-     `definitions.subgraphs[].nodes`, por isso a varredura e recursiva.
-  2. Links de modelos escritos em nodes do tipo `MarkdownNote` (ex: um LoRA
-     opcional que nao esta ligado a nenhum node). Marcados como opcionais.
+Two sources are used:
+  1. The `properties.models[]` lists inside each node (reliable source: provides
+     directory + name + url). Nodes may be at the root or inside
+     `definitions.subgraphs[].nodes`, which is why the scan is recursive.
+  2. Model links written in `MarkdownNote` nodes (e.g. an optional LoRA that is
+     not wired to any node). Flagged as optional.
 """
 
 import re
@@ -15,8 +15,8 @@ MODEL_EXTS = (
     ".gguf", ".onnx", ".sft", ".vae",
 )
 
-# Mapeia o tipo do node loader -> subpasta dentro de models/. Usado para
-# adivinhar onde um modelo "referenciado sem link" deveria ficar.
+# Maps the loader node type -> subfolder inside models/. Used to guess where a
+# model "referenced without a link" should go.
 NODE_DIR = {
     "CheckpointLoaderSimple": "checkpoints",
     "CheckpointLoader": "checkpoints",
@@ -41,7 +41,7 @@ NODE_DIR = {
 
 
 def _walk_models(obj, found):
-    """Varre recursivamente procurando listas `models` em qualquer node."""
+    """Recursively scan for `models` lists in any node."""
     if isinstance(obj, dict):
         models = obj.get("models")
         if isinstance(models, list):
@@ -97,7 +97,7 @@ def _parse_markdown_notes(obj, found):
 
 
 def _collect_nodes(obj, out):
-    """Junta todos os dicts que parecem nodes (tem widgets_values)."""
+    """Gather every dict that looks like a node (has widgets_values)."""
     if isinstance(obj, dict):
         if isinstance(obj.get("widgets_values"), list):
             out.append(obj)
@@ -109,10 +109,10 @@ def _collect_nodes(obj, out):
 
 
 def extract_referenced(data):
-    """Filenames de modelos citados nos widgets dos nodes (com ou sem link).
+    """Model filenames referenced in node widgets (with or without a link).
 
-    Serve para detectar dependencias que o workflow usa mas nao traz URL.
-    A subpasta e adivinhada pelo tipo do node loader.
+    Used to detect dependencies the workflow uses but provides no URL for.
+    The subfolder is guessed from the loader node type.
     """
     nodes = []
     _collect_nodes(data, nodes)
@@ -135,14 +135,14 @@ def extract_referenced(data):
 
 
 def parse_workflow(data):
-    """Retorna lista de dicts: {name, directory, url, optional}, sem duplicatas."""
+    """Return a list of dicts: {name, directory, url, optional}, deduplicated."""
     structured = []
     _walk_models(data, structured)
 
     markdown = []
     _parse_markdown_notes(data, markdown)
 
-    # Dedupe por URL. Se aparecer nas duas fontes, vale como obrigatorio.
+    # Dedupe by URL. If it shows up in both sources, treat it as required.
     by_url = {}
     for m in structured + markdown:
         key = m["url"]
