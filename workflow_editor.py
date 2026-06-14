@@ -1031,6 +1031,72 @@ def suggest_lighter_models(data, apply_safe=True):
     return {"suggestions": suggestions, "applied": applied}
 
 
+# --------------------------------------------------------------------------- #
+# SageAttention mode safety ("never let a Patch Sage Attention node error")
+#
+# KJNodes' "Patch Sage Attention" node (type PathchSageAttentionKJ — the typo is
+# theirs) has a sage_attention dropdown that pins ONE specific kernel. An explicit
+# pick hard-fails when that kernel isn't available for the installed sageattention
+# build or the GPU arch:
+#   - every named mode (..._cuda, ..._fp8_cuda, ..._fp8_cuda++, sageattn3*) belongs
+#     to SageAttention 2, which must be compiled from source (nvcc + MSVC). The
+#     pip wheel (sageattention 1.x) only ships "sageattn", so those modes raise
+#     ImportError there.
+#   - the fp8 / sageattn3 kernels additionally need an Ada/Hopper/Blackwell GPU;
+#     on Ampere or older they're unsupported.
+# "auto" sidesteps both: it does `from sageattention import sageattn`, letting the
+# library dispatch to whatever kernel is actually present and supported. It's the
+# one non-disabled mode that can't raise a mode/arch mismatch — so we normalize any
+# explicit pick to it. "disabled" (user opted out) and "auto" are left untouched.
+# --------------------------------------------------------------------------- #
+_SAGE_PATCH_TYPES = {"PathchSageAttentionKJ", "PatchSageAttentionKJ"}
+_SAGE_SAFE_MODE = "auto"
+# The full dropdown (KJNodes model_optimization_nodes.py: sageattn_modes). We only
+# rewrite values we recognise, so an unexpected widget value is left alone.
+_SAGE_MODES = {
+    "disabled", "auto",
+    "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton",
+    "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++",
+    "sageattn3", "sageattn3_per_block_mean",
+}
+
+
+def _sage_widget(node):
+    """Return (container, key, value) for the node's sage_attention widget.
+
+    The mode is widget slot 0 in the positional list (allow_compile follows it);
+    handle the dict variant by key too. Returns None when absent."""
+    wv = node.get("widgets_values")
+    if isinstance(wv, dict) and isinstance(wv.get("sage_attention"), str):
+        return wv, "sage_attention", wv["sage_attention"]
+    if isinstance(wv, list) and wv and isinstance(wv[0], str):
+        return wv, 0, wv[0]
+    return None
+
+
+def make_sage_attention_safe(data):
+    """Rewrite every Patch Sage Attention node pinned to an explicit kernel to
+    "auto" (mutating ``data`` in place). Returns ``{changed: [...], present: n}``
+    where ``changed`` lists "<old> → auto" strings and ``present`` counts all sage
+    patch nodes seen (changed or not)."""
+    changed, present = [], 0
+    nodes = []
+    _collect_nodes(data, nodes)
+    for n in nodes:
+        if n.get("type") not in _SAGE_PATCH_TYPES:
+            continue
+        w = _sage_widget(n)
+        if not w:
+            continue
+        present += 1
+        container, key, cur = w
+        if cur in ("disabled", _SAGE_SAFE_MODE) or cur not in _SAGE_MODES:
+            continue
+        container[key] = _SAGE_SAFE_MODE
+        changed.append(f"{cur} → {_SAGE_SAFE_MODE}")
+    return {"changed": changed, "present": present}
+
+
 def inject_speedups(data, options=None):
     """Inject speed-up nodes into ``data`` (mutated in place).
 
@@ -1041,6 +1107,7 @@ def inject_speedups(data, options=None):
       teacache_thresh: rel_l1_thresh for TeaCache (default TEACACHE_THRESH).
       lighter        : suggest lighter compatible models (default True).
       lighter_apply  : auto-repoint safe fp8 swaps in the workflow (default True).
+      sage_safe      : normalize Patch Sage Attention nodes to "auto" (default True).
 
     Returns a report dict: {applied, skipped, needs_setup, suggestions}.
     """
@@ -1050,10 +1117,26 @@ def inject_speedups(data, options=None):
     thresh = options.get("teacache_thresh", TEACACHE_THRESH)
     do_lighter = options.get("lighter", True)
     lighter_apply = options.get("lighter_apply", True)
+    do_sage_safe = options.get("sage_safe", True)
 
     applied, skipped, needs = [], [], []
 
-    # 0) Lighter-model suggestions (and safe fp8 file swaps) FIRST, so the fp8
+    # 0a) SageAttention safety: pin any "Patch Sage Attention" node to "auto" so
+    #     it uses whatever kernel is installed/supported instead of a hard-coded
+    #     one that may not exist (ModuleNotFoundError / ImportError) on this build.
+    if do_sage_safe:
+        sage = make_sage_attention_safe(data)
+        if sage["changed"]:
+            applied.append(
+                "SageAttention: set %d 'Patch Sage Attention' node(s) to 'auto' "
+                "(was %s) — uses the kernel actually installed/supported, avoiding "
+                "mode-mismatch errors." % (len(sage["changed"]), ", ".join(sage["changed"])))
+        if sage["present"]:
+            needs.append("SageAttention must be installed in the ComfyUI Python env "
+                         "(pip install sageattention) for the Patch Sage Attention "
+                         "node to run; 'auto' then picks the available kernel.")
+
+    # 0b) Lighter-model suggestions (and safe fp8 file swaps) FIRST, so the fp8
     #    precision pass below sees the post-swap filenames and won't re-cast a
     #    file that is already fp8.
     suggestions = []
