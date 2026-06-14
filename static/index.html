@@ -73,6 +73,9 @@
   .grow { flex: 1; }
   .swap-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; user-select: none; }
   .swap-toggle input { cursor: pointer; }
+  .swap-alert { margin-top: 10px; padding: 10px 12px; border: 1px solid #e0564f; border-left: 4px solid #e0564f;
+                border-radius: 6px; background: rgba(224,86,79,0.12); color: #ff8a82; font-size: 13px; }
+  .swap-alert code { color: #ffd9d6; }
   .drop {
     border: 2px dashed var(--border); border-radius: 10px; padding: 26px; text-align: center;
     color: var(--muted); cursor: pointer; transition: border-color .15s;
@@ -1328,6 +1331,17 @@ function renderFasterReport(rep, gpu) {
                 : `<span class="msg">No direct link catalogued — search this name in the Model downloader.</span>`}
       </div>`;
     });
+
+    // Loud, visible notice of the models that were ACTUALLY swapped in the file.
+    const swapped = SUGGESTIONS.filter(s => s.auto_applied);
+    if (swapped.length) {
+      const rows = swapped.map(s =>
+        `<li><code>${esc(s.current)}</code> → <b>${esc(s.filename)}</b></li>`).join('');
+      html += `<div class="swap-alert">
+        ⚠️ Models swapped in <b>${esc(EDITOR_NAME)}_faster.json</b> — download the new file${swapped.length > 1 ? 's' : ''} above (or re-import this workflow in the downloader) before running:
+        <ul style="margin:6px 0 0;">${rows}</ul>
+      </div>`;
+    }
   }
 
   html += `<div class="vram-note">DEMO: the TeaCache node needs the ComfyUI-TeaCache ` +
