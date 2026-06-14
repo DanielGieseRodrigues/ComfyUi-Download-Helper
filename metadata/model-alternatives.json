@@ -1,0 +1,85 @@
+{
+    "version": "1.0",
+    "description": "Lighter, compatible alternatives suggested by 'Generate Faster'. Each family is matched against the diffusion-model filename referenced in the workflow. fp8 entries with same_loader=true are safe to repoint automatically (same loader node, just a different file); gguf / different-loader entries are suggested with a setup note only. All URLs are diffusion-model-only files that fit the matched loader (NOT all-in-one checkpoints), and were verified against their HuggingFace repos.",
+    "families": [
+        {
+            "label": "FLUX.1 dev",
+            "match": "flux\\.?1?[-_]?dev",
+            "skip_if": "fp8|gguf|nf4|q\\d|schnell|fp4",
+            "alternatives": [
+                {
+                    "filename": "flux1-dev-fp8-e4m3fn.safetensors",
+                    "url": "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8-e4m3fn.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "11.9 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Pre-quantized fp8 diffusion model (~12 GB vs ~24 GB). Loads in the same 'Load Diffusion Model' node — practically the same quality, half the VRAM/disk."
+                },
+                {
+                    "filename": "flux1-dev-Q4_K_S.gguf",
+                    "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_K_S.gguf",
+                    "directory": "diffusion_models",
+                    "size_text": "~6.8 GB",
+                    "kind": "gguf",
+                    "same_loader": false,
+                    "loader_node": "UnetLoaderGGUF",
+                    "for_loaders": ["UNETLoader"],
+                    "note": "GGUF Q4 (~7 GB) — the smallest option. Needs the ComfyUI-GGUF custom node and a 'Unet Loader (GGUF)' node instead of 'Load Diffusion Model'. A bit slower per step, but fits the tightest VRAM."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.1 i2v 480p 14B",
+            "match": "wan2\\.?1.*i2v.*480p.*14b",
+            "skip_if": "fp8|gguf|q\\d",
+            "alternatives": [
+                {
+                    "filename": "wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~16 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8 repack of the same WAN 2.1 i2v 480p model — same loader, roughly half the VRAM."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.1 i2v 720p 14B",
+            "match": "wan2\\.?1.*i2v.*720p.*14b",
+            "skip_if": "fp8|gguf|q\\d",
+            "alternatives": [
+                {
+                    "filename": "wan2.1_i2v_720p_14B_fp8_e4m3fn.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_e4m3fn.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~16 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8 repack of the same WAN 2.1 i2v 720p model — same loader, roughly half the VRAM."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.1 t2v 14B",
+            "match": "wan2\\.?1.*t2v.*14b",
+            "skip_if": "fp8|gguf|q\\d|1\\.3b",
+            "alternatives": [
+                {
+                    "filename": "wan2.1_t2v_14B_fp8_e4m3fn.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_e4m3fn.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~16 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8 repack of the same WAN 2.1 t2v 14B model — same loader, roughly half the VRAM."
+                }
+            ]
+        }
+    ]
+}

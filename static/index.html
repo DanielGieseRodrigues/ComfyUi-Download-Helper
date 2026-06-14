@@ -127,6 +127,21 @@
   .duration-box h3 { margin: 0 0 10px; font-size: 14px; }
   .duration-box .row { align-items: center; }
   .duration-box input { max-width: 130px; font-size: 16px; }
+  .vram-box { border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 18px; background: var(--panel2); }
+  .vram-box.v-ok { border-left-color: var(--ok); }
+  .vram-box.v-warn { border-left-color: var(--warn); }
+  .vram-box.v-bad { border-left-color: var(--err); }
+  .vram-box.v-unknown { border-left-color: var(--muted); }
+  .vram-head { font-size: 14px; }
+  .vram-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .vram-verdict { font-size: 13px; margin-top: 6px; font-weight: 600; }
+  .vram-box.v-ok .vram-verdict { color: var(--ok); }
+  .vram-box.v-warn .vram-verdict { color: var(--warn); }
+  .vram-box.v-bad .vram-verdict { color: var(--err); }
+  .vram-advice { margin: 8px 0 0; padding-left: 18px; font-size: 12px; }
+  .vram-advice li { margin: 2px 0; }
+  .vram-note { color: var(--muted); font-size: 11px; margin-top: 8px; font-style: italic; }
   .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
   .field-grid .full { grid-column: 1 / -1; }
   textarea { width: 100%; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
@@ -170,6 +185,15 @@
         <button class="ghost" onclick="validatePath()">Validate</button>
       </div>
       <div class="msg" id="pathMsg"></div>
+    </div>
+    <div class="field">
+      <label>ComfyUI <em>program</em> folder — the one with <code>custom_nodes/</code> and <code>main.py</code>
+        <span class="help" tabindex="0">?<span class="tip">Only needed when it differs from the folder above — e.g. a shared-models setup where models live in a separate folder. Custom node packs are installed here. Leave empty to use the folder above.</span></span>
+      </label>
+      <div class="row">
+        <div><input type="text" id="comfyInstallPath" placeholder="(only if different — leave empty to reuse the folder above)"></div>
+        <button class="ghost" onclick="saveConfig()">Save</button>
+      </div>
     </div>
   </div>
 
@@ -249,6 +273,23 @@
     </table>
   </div>
 
+  <!-- Custom nodes -->
+  <div class="card hidden" id="nodesCard">
+    <div class="toolbar">
+      <h2 style="margin:0;">🧩 Custom nodes</h2>
+      <span class="help" tabindex="0">?<span class="tip">Reads each node's pack info (<code>cnr_id</code> / <code>aux_id</code>) from the workflow and installs the missing custom node packs with <code>git clone</code> into <code>custom_nodes/</code>, then runs each pack's <code>requirements.txt</code> in your ComfyUI Python. Needs git installed.</span></span>
+      <div class="grow"></div>
+      <button class="ghost sm" onclick="recheckAllNodes()">↻ Re-check</button>
+      <button onclick="installAllNodes()" id="nodeAllBtn">⬇ Install everything missing</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Pack</th><th>Source</th><th>Nodes used</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="nodeRows"></tbody>
+    </table>
+  </div>
+
   </div><!-- /tab-downloader -->
 
   <!-- ===================== TAB: EDITOR ===================== -->
@@ -268,9 +309,17 @@
         <h2 style="margin:0;"><span class="step">2</span> Edit</h2>
         <span class="cat-badge" id="edCat"></span>
         <div class="grow"></div>
+        <button class="ghost" onclick="generateFaster()" id="edFasterBtn"
+          title="Inject native speed-ups (fp8 + torch.compile) into the workflow">⚡ Generate Faster (DEMO)</button>
         <button onclick="exportWorkflow()" id="edExportBtn">⬇ Export workflow.json</button>
       </div>
       <div id="edWarnings"></div>
+
+      <!-- Speed-up report (filled by Generate Faster) -->
+      <div class="vram-box hidden" id="edFasterReport"></div>
+
+      <!-- VRAM estimate -->
+      <div class="vram-box hidden" id="edVram"></div>
 
       <!-- Duration (star feature) -->
       <div class="duration-box hidden" id="edDurationBox">
@@ -358,6 +407,7 @@
 <script>
 let MODELS = [];
 let MISSING = [];
+let NODES = [];
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -368,6 +418,7 @@ async function api(path, opts) {
 async function loadConfig() {
   const cfg = await api('/api/config');
   comfyPath.value = cfg.comfyui_path || '';
+  comfyInstallPath.value = cfg.comfyui_install_path || '';
   hfToken.value = cfg.hf_token || '';
   civToken.value = cfg.civitai_token || '';
   civRedToken.value = cfg.civitai_red_token || '';
@@ -378,7 +429,8 @@ async function saveConfig() {
   await api('/api/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      comfyui_path: comfyPath.value, hf_token: hfToken.value,
+      comfyui_path: comfyPath.value, comfyui_install_path: comfyInstallPath.value,
+      hf_token: hfToken.value,
       civitai_token: civToken.value, civitai_red_token: civRedToken.value,
       verify_ssl: verifySsl.checked
     })
@@ -418,14 +470,18 @@ async function handleFile(file) {
   if (r.error) { msg.className = 'msg err'; msg.textContent = '✗ ' + r.error; return; }
   MODELS = r.models;
   MISSING = r.missing || [];
-  if (!MODELS.length && !MISSING.length) { msg.className = 'msg warn'; msg.textContent = 'No dependencies found in this workflow.'; return; }
+  NODES = r.custom_nodes || [];
+  if (!MODELS.length && !MISSING.length && !NODES.length) { msg.className = 'msg warn'; msg.textContent = 'No dependencies found in this workflow.'; return; }
   msg.className = 'msg ok';
-  msg.textContent = `✓ ${MODELS.length} with a link` + (MISSING.length ? `, ${MISSING.length} without a link.` : '.');
+  msg.textContent = `✓ ${MODELS.length} with a link` + (MISSING.length ? `, ${MISSING.length} without a link` : '') +
+    (NODES.length ? `, ${NODES.length} custom node pack${NODES.length > 1 ? 's' : ''}.` : '.');
   if (!comfyPath.value) msg.textContent += ' Configure the ComfyUI folder to download.';
   renderRows();
   renderMissing();
+  renderNodes();
   document.getElementById('resultsCard').classList.toggle('hidden', !MODELS.length);
   document.getElementById('missingCard').classList.toggle('hidden', !MISSING.length);
+  document.getElementById('nodesCard').classList.toggle('hidden', !NODES.length);
 }
 
 function renderMissing() {
@@ -505,6 +561,103 @@ async function recheckMissing(i) {
   });
   MISSING[i].status = st;
   document.getElementById('mst-' + i).innerHTML = statusHtml(st);
+}
+
+// ---------- Custom nodes ----------
+function nodeStatusHtml(st) {
+  if (st && st.installed) return `<span class="status"><i class="dot ok"></i>Installed</span>`;
+  return `<span class="status"><i class="dot miss"></i>Missing</span>`;
+}
+
+function nodeSourceHtml(p) {
+  if (p.git_url) {
+    return `<a href="${p.git_url}" target="_blank" class="dir" style="text-decoration:none;">${esc(p.aux_id || p.repo || p.git_url)}</a>`;
+  }
+  if (p.cnr_id) return `<span class="dir">registry: ${esc(p.cnr_id)}</span>`;
+  return `<span class="dir">?</span>`;
+}
+
+function renderNodes() {
+  const tb = document.getElementById('nodeRows');
+  tb.innerHTML = '';
+  NODES.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.id = 'node-row-' + i;
+    const title = p.repo || p.cnr_id || p.aux_id || '(unknown)';
+    const types = (p.node_types || []).join(', ');
+    tr.innerHTML = `
+      <td>
+        <div class="fname">${esc(title)}${p.ver ? '<span class="dir"> · ' + esc(p.ver) + '</span>' : ''}</div>
+      </td>
+      <td>${nodeSourceHtml(p)}</td>
+      <td class="dir" title="${esc(types)}">${p.count} node${p.count > 1 ? 's' : ''}</td>
+      <td id="node-st-${i}">${nodeStatusHtml(p.status)}</td>
+      <td class="actions">
+        <button class="ghost sm" onclick="recheckNode(${i})" title="Re-check">↻</button>
+        <button class="sm" id="node-dl-${i}" onclick="installNode(${i})">⬇ Install</button>
+      </td>`;
+    tb.appendChild(tr);
+    syncNodeBtn(i);
+  });
+}
+
+function syncNodeBtn(i) {
+  const btn = document.getElementById('node-dl-' + i);
+  if (!btn) return;
+  if (NODES[i].status && NODES[i].status.installed) { btn.textContent = '✓ Ok'; btn.disabled = true; }
+  else { btn.textContent = '⬇ Install'; btn.disabled = false; }
+}
+
+async function recheckNode(i) {
+  const st = await api('/api/node/check', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(NODES[i])
+  });
+  NODES[i].status = st;
+  document.getElementById('node-st-' + i).innerHTML = nodeStatusHtml(st);
+  syncNodeBtn(i);
+}
+async function recheckAllNodes() { for (let i = 0; i < NODES.length; i++) await recheckNode(i); }
+
+async function installNode(i) {
+  const btn = document.getElementById('node-dl-' + i);
+  const stCell = document.getElementById('node-st-' + i);
+  btn.disabled = true; btn.textContent = '...';
+  const r = await api('/api/node/install', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(NODES[i])
+  });
+  if (r.error) { stCell.innerHTML = `<span class="status"><i class="dot err"></i>${esc(r.error)}</span>`; btn.disabled = false; btn.textContent = '⬇ Install'; return; }
+  await pollNode(r.job_id, i, stCell);
+}
+
+function pollNode(jobId, i, stCell) {
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      const j = await api('/api/progress/' + jobId);
+      if (j.status === 'installing') {
+        const label = ({queued: 'Queued…', cloning: 'Cloning…', pip: 'Installing requirements…'}[j.step]) || (j.message || 'Installing…');
+        stCell.innerHTML = `<span class="status"><i class="dot down"></i>${esc(label)}</span>`;
+      } else {
+        clearInterval(t);
+        if (j.status === 'done') { await recheckNode(i); }
+        else {
+          stCell.innerHTML = `<span class="status"><i class="dot err"></i>${esc(j.error || j.message || 'failed')}</span>`;
+          const btn = document.getElementById('node-dl-' + i); btn.disabled = false; btn.textContent = '↻ Retry';
+        }
+        resolve();
+      }
+    }, 800);
+  });
+}
+
+async function installAllNodes() {
+  const btn = document.getElementById('nodeAllBtn');
+  btn.disabled = true;
+  for (let i = 0; i < NODES.length; i++) {
+    if (!(NODES[i].status && NODES[i].status.installed)) await installNode(i);
+  }
+  btn.disabled = false;
 }
 
 // ---------- Render ----------
@@ -810,6 +963,14 @@ edDrop.ondragleave = () => edDrop.classList.remove('over');
 edDrop.ondrop = e => { e.preventDefault(); edDrop.classList.remove('over'); if (e.dataTransfer.files[0]) loadWorkflow(e.dataTransfer.files[0]); };
 edFile.onchange = () => { if (edFile.files[0]) loadWorkflow(edFile.files[0]); };
 
+// Re-estimate VRAM when size / frames / precision change (delegated, so it
+// survives the grids' innerHTML re-renders).
+['edMain', 'edAdvanced'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', scheduleVram);
+  el.addEventListener('change', scheduleVram);
+});
+
 async function loadWorkflow(file) {
   const msg = document.getElementById('edMsg');
   msg.className = 'msg'; msg.textContent = 'Analyzing ' + file.name + '...';
@@ -883,6 +1044,76 @@ function renderEditor(model) {
   const advEl = document.getElementById('edAdvanced');
   advEl.innerHTML = adv.map(renderField).join('');
   document.getElementById('edAdvToggle').classList.toggle('hidden', !adv.length);
+
+  recalcVram();
+}
+
+// --- VRAM estimate -------------------------------------------------------- //
+// Reads the editor's current values, asks the server for a rough VRAM estimate
+// (judged against the detected GPU), and renders a fits/tight/over banner.
+function curFieldValue(role) {
+  const f = EDITOR_MODEL && EDITOR_MODEL.fields.find(x => x.role === role);
+  if (!f) return null;
+  const el = document.getElementById('ef-' + f.id);
+  return el ? el.value : f.value;
+}
+
+function curFrames() {
+  const d = EDITOR_MODEL && EDITOR_MODEL.duration;
+  if (d && d.seconds != null && d.fps) {
+    const secs = parseFloat(document.getElementById('edDuration').value) || 0;
+    return Math.max(1, Math.round(secs * d.fps));
+  }
+  return curFieldValue('video_length');
+}
+
+let vramTimer = null;
+function scheduleVram() { clearTimeout(vramTimer); vramTimer = setTimeout(recalcVram, 300); }
+
+async function recalcVram() {
+  if (!EDITOR_MODEL) return;
+  const body = {
+    category: EDITOR_MODEL.summary.category,
+    width: curFieldValue('width'),
+    height: curFieldValue('height'),
+    frames: curFrames(),
+    unet_name: curFieldValue('unet_name'),
+    weight_dtype: curFieldValue('weight_dtype'),
+  };
+  let r;
+  try {
+    r = await fetch('/api/workflow/estimate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    }).then(x => x.json());
+  } catch (e) { document.getElementById('edVram').classList.add('hidden'); return; }
+  renderVram(r);
+}
+
+function renderVram(r) {
+  const box = document.getElementById('edVram');
+  const est = r.estimate, gpu = r.gpu;
+  const v = est.verdict;
+  box.classList.remove('hidden');
+  box.className = 'vram-box ' + ({fits:'v-ok', tight:'v-warn', over:'v-bad'}[v] || 'v-unknown');
+  const icon = ({fits:'✅', tight:'🟡', over:'⛔'}[v]) || 'ℹ️';
+  const head = est.peak_gb != null
+    ? `${icon} Estimated peak ≈ <b>${est.peak_gb} GB</b>` + (gpu ? ` of ${gpu.total_gb} GB` : '')
+    : `${icon} Couldn't size the model from its file name`;
+  const gpuTxt = gpu ? `${esc(gpu.name)} · ${gpu.total_gb} GB` : 'No NVIDIA GPU detected';
+  const parts = [];
+  if (est.model_gb != null) parts.push(`model ${est.model_gb} GB (${esc(est.precision)})`);
+  if (est.overhead_gb != null) parts.push(`generation ~${est.overhead_gb} GB`);
+  const verdictTxt = {fits:'Fits comfortably', tight:'Tight — may offload to RAM and slow down',
+    over:"Won't fit — expect offload or out-of-memory"}[v] || '';
+  box.innerHTML =
+    `<div class="vram-head">${head}</div>` +
+    `<div class="vram-sub">${gpuTxt}${parts.length ? ' · ' + parts.join(' + ') : ''}</div>` +
+    (verdictTxt ? `<div class="vram-verdict">${verdictTxt}</div>` : '') +
+    (est.advice.length ? '<ul class="vram-advice">' +
+      est.advice.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>' : '') +
+    `<div class="vram-note">Rough estimate — real VRAM depends on attention, ` +
+    `offload and block-swap settings.</div>`;
 }
 
 function renderField(f) {
@@ -935,7 +1166,9 @@ async function uploadRefImage(targetId, input) {
   const r = await fetch('/api/workflow/upload-image', {method: 'POST', body: fd}).then(x => x.json());
   if (r.error) { target.value = prev; alert('Upload failed: ' + r.error); return; }
   target.value = r.filename;  // now lives in ComfyUI/input/, ready for LoadImage
-  if (dims) setRefDims(dims, true);  // auto-apply so Width/Height match the image
+  // Record the size and enable the "From image" button, but DON'T touch
+  // Width/Height — keep the workflow's native size unless the user clicks it.
+  if (dims) setRefDims(dims, false);
 }
 
 // Read an image File's natural pixel dimensions in the browser.
@@ -982,6 +1215,7 @@ function updateDurationHint() {
   let txt = `≈ ${frames} frames @ ${d.fps} fps (model base rate)`;
   if (d.interpolated) txt += ' · this workflow interpolates to a higher playback FPS';
   document.getElementById('edDurationHint').textContent = txt;
+  scheduleVram();  // frame count changed -> VRAM estimate changed
 }
 
 function toggleAdvanced() {
@@ -999,11 +1233,9 @@ function readField(f) {
   return el.value;
 }
 
-async function exportWorkflow() {
-  if (!EDITOR_WF || !EDITOR_MODEL) return;
-  const btn = document.getElementById('edExportBtn');
-  btn.disabled = true; const orig = btn.textContent; btn.textContent = '...';
-
+// Collect the current editor edits into the {workflow, edits, duration_seconds}
+// body shared by Export and Generate Faster.
+function buildEditorBody() {
   const edits = {};
   for (const f of EDITOR_MODEL.fields) {
     const v = readField(f);
@@ -1020,19 +1252,107 @@ async function exportWorkflow() {
   if (!dbox.classList.contains('hidden')) {
     body.duration_seconds = parseFloat(document.getElementById('edDuration').value) || 0;
   }
+  return body;
+}
+
+function downloadWorkflow(wf, suffix) {
+  const blob = new Blob([JSON.stringify(wf, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = EDITOR_NAME + suffix + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function exportWorkflow() {
+  if (!EDITOR_WF || !EDITOR_MODEL) return;
+  const btn = document.getElementById('edExportBtn');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = '...';
 
   const r = await api('/api/workflow/export', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(buildEditorBody())
   });
   btn.disabled = false; btn.textContent = orig;
   if (r.error) { alert('Export failed: ' + r.error); return; }
+  downloadWorkflow(r.workflow, '_edited');
+}
 
-  const blob = new Blob([JSON.stringify(r.workflow, null, 2)], {type: 'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = EDITOR_NAME + '_edited.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
+async function generateFaster() {
+  if (!EDITOR_WF || !EDITOR_MODEL) return;
+  const btn = document.getElementById('edFasterBtn');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = '⚡ ...';
+
+  const r = await api('/api/workflow/optimize', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(buildEditorBody())
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (r.error) { alert('Optimize failed: ' + r.error); return; }
+
+  renderFasterReport(r.report, r.gpu);
+  downloadWorkflow(r.workflow, '_faster');
+}
+
+function renderFasterReport(rep, gpu) {
+  const box = document.getElementById('edFasterReport');
+  box.classList.remove('hidden');
+  box.className = 'vram-box v-ok';
+  const li = arr => arr.map(x => '<li>' + esc(x) + '</li>').join('');
+  let html = `<div class="vram-head">⚡ Applied to <b>${esc(EDITOR_NAME)}_faster.json</b>` +
+    (gpu ? ` · ${esc(gpu.name)}` : '') + '</div>';
+  if (rep.applied.length)
+    html += '<div class="vram-sub">✅ Done in the workflow:</div><ul class="vram-advice">' + li(rep.applied) + '</ul>';
+  if (rep.skipped && rep.skipped.length)
+    html += '<div class="vram-sub">↷ Skipped:</div><ul class="vram-advice">' + li(rep.skipped) + '</ul>';
+  if (rep.needs_setup && rep.needs_setup.length)
+    html += '<div class="vram-sub">🛠️ One-time setup in your ComfyUI install:</div><ul class="vram-advice">' + li(rep.needs_setup) + '</ul>';
+
+  SUGGESTIONS = (rep.suggestions || []);
+  if (SUGGESTIONS.length) {
+    html += '<div class="vram-sub">🪶 Lighter models you can switch to:</div>';
+    SUGGESTIONS.forEach((s, i) => {
+      const tag = s.auto_applied ? '✓ repointed in _faster.json'
+        : (s.same_loader ? 'same loader' : 'needs ' + esc(s.loader_node || 'a different loader'));
+      html += `<div class="sugg" style="margin:6px 0;padding:8px;border:1px solid var(--line,#333);border-radius:6px;">
+        <div><b>${esc(s.filename)}</b> <span class="status">${s.size_text ? esc(s.size_text) + ' · ' : ''}${tag}</span></div>
+        <div class="hint" style="margin:2px 0 6px;">replaces <code>${esc(s.current)}</code> — ${esc(s.note)}</div>
+        ${s.url ? `<button class="sm" id="sugg-dl-${i}">⬇ Download</button> <span class="msg" id="sugg-st-${i}"></span>`
+                : `<span class="msg">No direct link catalogued — search this name in the Model downloader.</span>`}
+      </div>`;
+    });
+  }
+
+  html += `<div class="vram-note">DEMO: the TeaCache node needs the ComfyUI-TeaCache ` +
+    `custom node installed, otherwise it loads as "missing". fp8 works out of the box. ` +
+    `Lighter-model swaps only affect the exported _faster.json — your original workflow is untouched.</div>`;
+  box.innerHTML = html;
+
+  // Wire the download buttons after innerHTML is in the DOM.
+  SUGGESTIONS.forEach((s, i) => {
+    if (!s.url) return;
+    const btn = document.getElementById('sugg-dl-' + i);
+    if (btn) btn.onclick = () => downloadSuggestion(i);
+  });
+}
+
+let SUGGESTIONS = [];
+
+async function downloadSuggestion(i) {
+  const s = SUGGESTIONS[i];
+  const btn = document.getElementById('sugg-dl-' + i);
+  const st = document.getElementById('sugg-st-' + i);
+  btn.disabled = true; st.textContent = 'starting...';
+  const item = {name: s.filename, directory: s.directory, url: s.url};
+  const r = await api('/api/download', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(item)
+  });
+  if (r.error) { st.textContent = '✗ ' + r.error; btn.disabled = false; return; }
+  if (r.skipped) { st.textContent = '✓ already exists'; btn.textContent = '✓ Ok'; return; }
+  st.textContent = '✓ downloading in background';
+  btn.textContent = '✓ Started';
+  trackDownload(r.job_id, s.filename, s.directory, refreshMainStatuses);
 }
 
 loadConfig();

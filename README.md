@@ -12,6 +12,7 @@ text encoders, LoRAs) straight into the right folders.
 - Places each file in the correct folder (`models/diffusion_models/`, `models/loras/`, etc.).
 - Skips files that already exist.
 - Searches by name when a model has no link.
+- **Installs missing custom node packs automatically.** Reads each node's pack info (`cnr_id` / `aux_id`, the same metadata ComfyUI-Manager uses) from the workflow, `git clone`s the missing packs into `custom_nodes/` and runs each one's `requirements.txt` in your ComfyUI Python. Packs only known by registry id are resolved through the Comfy Registry. Requires `git` on PATH.
 
 ## 🎛️ Workflow editor
 
@@ -20,6 +21,7 @@ values that matter, then export a modified `workflow.json` to load back into Com
 
 - Edits **positive / negative prompts**, steps, CFG, seed (+ randomize), size, batch, LoRA strength, sampler and output name.
 - **Video duration in seconds** — type "6 seconds" and it converts to the right frame count using the workflow's FPS (and accounts for frame interpolation).
+- **⚡ Generate Faster (DEMO)** — injects the native speed-ups straight into the workflow: sets the diffusion model to **fp8** precision (≈ half the VRAM) and splices a **torch.compile** node before the sampler. It then reports the levers that need a one-time change to the ComfyUI install itself (Triton, SageAttention, TeaCache). Works on both flat and subgraph workflows; re-running won't duplicate the nodes.
 - Recognizes native ComfyUI nodes (and common WAN video nodes); anything it doesn't understand is left untouched.
 
 ## How to use

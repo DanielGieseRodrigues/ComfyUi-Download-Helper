@@ -11,12 +11,14 @@ import json
 import logging
 import os
 import struct
+import subprocess
 import threading
 import uuid
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
+import custom_nodes
 import model_registry
 import workflow_editor
 from workflow_parser import MODEL_EXTS, extract_referenced, parse_workflow
@@ -54,6 +56,11 @@ LOG_PATH = os.path.join(BASE, "helper.log")
 # but the user can turn it off if the environment (antivirus/proxy) blocks it.
 DEFAULT_CONFIG = {
     "comfyui_path": "",
+    # ComfyUI program folder (the one with custom_nodes/ and main.py). Only
+    # needed when it differs from comfyui_path — e.g. a shared-models setup
+    # where comfyui_path points at a models-only folder. Empty = same as
+    # comfyui_path.
+    "comfyui_install_path": "",
     "hf_token": "",
     "civitai_token": "",
     "civitai_red_token": "",
@@ -129,6 +136,26 @@ def target_path(cfg, item):
     return os.path.join(cfg["comfyui_path"], "models", item["directory"], item["name"])
 
 
+def _looks_like_install(path):
+    """A folder is a ComfyUI program install if it has custom_nodes/ or main.py."""
+    return bool(path) and (
+        os.path.isdir(os.path.join(path, "custom_nodes"))
+        or os.path.isfile(os.path.join(path, "main.py")))
+
+
+def resolve_install_path(cfg):
+    """Folder where custom_nodes/ lives. Uses the explicit install path when set,
+    otherwise the models path when it looks like a real install. Returns None when
+    we can't tell (then custom-node install is disabled with a helpful message)."""
+    explicit = (cfg.get("comfyui_install_path") or "").strip()
+    if explicit:
+        return explicit
+    mp = (cfg.get("comfyui_path") or "").strip()
+    if _looks_like_install(mp):
+        return mp
+    return None
+
+
 def check_status(cfg, item):
     path = cfg.get("comfyui_path")
     if not path:
@@ -200,8 +227,15 @@ def parse():
     for r in missing:
         r["status"] = check_status(cfg, r)
 
-    return jsonify(models=models, missing=missing,
-                   comfyui_path=cfg.get("comfyui_path", ""))
+    # Custom node packs the workflow depends on (from each node's cnr_id/aux_id).
+    install_path = resolve_install_path(cfg)
+    nodes = custom_nodes.extract_node_packs(data)
+    for p in nodes:
+        p["status"] = custom_nodes.pack_install_status(p, install_path or "")
+
+    return jsonify(models=models, missing=missing, custom_nodes=nodes,
+                   comfyui_path=cfg.get("comfyui_path", ""),
+                   install_path=install_path or "")
 
 
 # --------------------------------------------------------------------------- #
@@ -481,6 +515,65 @@ def progress(job_id):
 
 
 # --------------------------------------------------------------------------- #
+# Custom node packs (git clone into custom_nodes/ + optional pip install)
+# --------------------------------------------------------------------------- #
+def do_install_node(job_id, cfg, pack, install_path):
+    def log_step(step, message):
+        with jobs_lock:
+            jobs[job_id]["step"] = step
+            jobs[job_id]["message"] = message
+        log.info("Node install [%s]: %s", step, message)
+
+    try:
+        ok, msg = custom_nodes.install_pack(
+            pack, install_path, verify=cfg.get("verify_ssl", True),
+            run_pip=True, log=log_step)
+    except Exception as exc:  # noqa: BLE001
+        ok, msg = False, str(exc)
+        log.error("Node install crashed: %s", exc)
+    with jobs_lock:
+        jobs[job_id]["status"] = "done" if ok else "error"
+        jobs[job_id]["message"] = msg
+        if not ok:
+            jobs[job_id]["error"] = msg
+
+
+@app.route("/api/node/install", methods=["POST"])
+def node_install():
+    cfg = load_config()
+    install_path = resolve_install_path(cfg)
+    if not install_path:
+        return jsonify(error="Set the ComfyUI program folder (the one with "
+                             "custom_nodes/) in step 1 first."), 400
+    pack = request.get_json(force=True) or {}
+    if not (pack.get("cnr_id") or pack.get("aux_id") or pack.get("git_url")):
+        return jsonify(error="No pack identifier."), 400
+
+    job_id = uuid.uuid4().hex
+    label = pack.get("repo") or pack.get("cnr_id") or pack.get("aux_id")
+    with jobs_lock:
+        jobs[job_id] = {
+            "name": label,
+            "kind": "node",
+            "status": "installing",
+            "step": "queued",
+            "message": "",
+            "error": None,
+        }
+    threading.Thread(target=do_install_node, args=(job_id, cfg, pack, install_path),
+                     daemon=True).start()
+    return jsonify(job_id=job_id)
+
+
+@app.route("/api/node/check", methods=["POST"])
+def node_check():
+    pack = request.get_json(force=True) or {}
+    cfg = load_config()
+    return jsonify(custom_nodes.pack_install_status(
+        pack, resolve_install_path(cfg) or ""))
+
+
+# --------------------------------------------------------------------------- #
 # Workflow editor (second tab): friendly field editing
 # --------------------------------------------------------------------------- #
 def _load_workflow_from_request():
@@ -512,6 +605,83 @@ def workflow_export():
     modified, applied = workflow_editor.apply_edits(data, edits, duration_seconds)
     log.info("Workflow export: applied %d edit(s)", len(applied))
     return jsonify(workflow=modified, applied=applied)
+
+
+def _fp8_variant_for_gpu(gpu):
+    """fp8_e4m3fn_fast uses fp8 matmul, which only pays off on Ada/Blackwell
+    (RTX 40xx/50xx). Everywhere else the plain fp8_e4m3fn is the safe pick —
+    same VRAM saving, no risk of an unsupported-op error."""
+    name = (gpu or {}).get("name", "").upper()
+    if "RTX 50" in name or "RTX 40" in name or "RTX 6000 ADA" in name or "H100" in name:
+        return "fp8_e4m3fn_fast"
+    return "fp8_e4m3fn"
+
+
+@app.route("/api/workflow/optimize", methods=["POST"])
+def workflow_optimize():
+    """"Generate Faster" (DEMO): apply the user's edits, then inject the native
+    speed-up nodes (fp8 precision + torch.compile) into the workflow. Returns the
+    optimized workflow plus a report of what was applied and what still needs a
+    one-time change to the ComfyUI install (the second phase)."""
+    body = request.get_json(force=True) or {}
+    data = body.get("workflow")
+    if not isinstance(data, dict):
+        return jsonify(error="Missing workflow."), 400
+    edits = body.get("edits") or {}
+    duration_seconds = body.get("duration_seconds")
+    modified, applied = workflow_editor.apply_edits(data, edits, duration_seconds)
+
+    gpu = detect_gpu()
+    report = workflow_editor.inject_speedups(
+        modified, options={"fp8_value": _fp8_variant_for_gpu(gpu)})
+    log.info("Workflow optimize: %d edit(s), %d speed-up(s)",
+             len(applied), len(report["applied"]))
+    return jsonify(workflow=modified, report=report, gpu=gpu)
+
+
+_gpu_cache = {"done": False, "gpu": None}
+
+
+def detect_gpu():
+    """Detect the primary NVIDIA GPU's name and total VRAM (GB) via nvidia-smi.
+
+    Cached after the first call. Returns ``{"name", "total_gb"}`` or ``None``
+    when no NVIDIA GPU / nvidia-smi is available (the estimate then degrades to
+    showing numbers without a fits/over verdict)."""
+    if _gpu_cache["done"]:
+        return _gpu_cache["gpu"]
+    _gpu_cache["done"] = True
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=8)
+        lines = (out.stdout or "").strip().splitlines()
+        if out.returncode == 0 and lines:
+            name, mem = (x.strip() for x in lines[0].split(",", 1))
+            _gpu_cache["gpu"] = {"name": name, "total_gb": round(float(mem) / 1024, 1)}
+            log.info("Detected GPU: %s (%s GB)", name, _gpu_cache["gpu"]["total_gb"])
+    except Exception as exc:  # noqa: BLE001  (nvidia-smi missing, timeout, etc.)
+        log.info("GPU detection unavailable: %s", exc)
+    return _gpu_cache["gpu"]
+
+
+@app.route("/api/workflow/estimate", methods=["POST"])
+def workflow_estimate():
+    """Rough VRAM estimate for the current editor values, judged against the
+    detected GPU. Numbers are estimates; the verdict is the useful part."""
+    body = request.get_json(force=True) or {}
+    gpu = detect_gpu()
+    est = workflow_editor.estimate_vram(
+        category=body.get("category"),
+        width=body.get("width"),
+        height=body.get("height"),
+        frames=body.get("frames"),
+        unet_name=body.get("unet_name"),
+        weight_dtype=body.get("weight_dtype"),
+        vram_total_gb=gpu["total_gb"] if gpu else None,
+    )
+    return jsonify(estimate=est, gpu=gpu)
 
 
 def _image_size(path):
