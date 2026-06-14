@@ -629,11 +629,13 @@ def workflow_optimize():
         return jsonify(error="Missing workflow."), 400
     edits = body.get("edits") or {}
     duration_seconds = body.get("duration_seconds")
+    swap_models = bool(body.get("swap_models"))
     modified, applied = workflow_editor.apply_edits(data, edits, duration_seconds)
 
     gpu = detect_gpu()
     report = workflow_editor.inject_speedups(
-        modified, options={"fp8_value": _fp8_variant_for_gpu(gpu)})
+        modified, options={"fp8_value": _fp8_variant_for_gpu(gpu),
+                           "lighter": swap_models, "lighter_apply": swap_models})
     log.info("Workflow optimize: %d edit(s), %d speed-up(s)",
              len(applied), len(report["applied"]))
     return jsonify(workflow=modified, report=report, gpu=gpu)

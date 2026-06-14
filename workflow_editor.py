@@ -923,6 +923,16 @@ _DIFFUSION_LOADER_FILENAME_IDX = {
 }
 
 
+_PREQUANT_RE = _re_alt.compile(
+    r"(fp8|e4m3|e5m2|nf4|gguf|[-_]q\d|scaled)", _re_alt.IGNORECASE)
+
+
+def _is_prequantized_filename(name):
+    """True when the file name already signals a low-precision/quantized model
+    (fp8, fp8_scaled, GGUF, Qn, nf4) — i.e. no fp8 re-cast is needed/wanted."""
+    return bool(_PREQUANT_RE.search(os.path.basename(name or "")))
+
+
 def _load_alternatives():
     if not _alt_cache["loaded"]:
         _alt_cache["loaded"] = True
@@ -992,9 +1002,18 @@ def suggest_lighter_models(data, apply_safe=True):
                         and alt.get("kind") == "fp8" and alt.get("url"))
             if auto:
                 node["widgets_values"][idx] = alt["filename"]
-                applied.append(
-                    f"{short} → {alt['filename']} (fp8, {alt.get('size_text', 'smaller')}"
-                    ") — repointed in the workflow; download it below to use it.")
+                msg = (f"{short} → {alt['filename']} (fp8, "
+                       f"{alt.get('size_text', 'smaller')}) — repointed in the "
+                       "workflow; download it below to use it.")
+                # The file is already fp8, so the loader must NOT re-cast it:
+                # reset weight_dtype to "default" (required for fp8_scaled files,
+                # harmless for plain fp8). UNETLoader keeps weight_dtype at idx 1.
+                wv = node["widgets_values"]
+                if (loader_type == "UNETLoader" and isinstance(wv, list)
+                        and len(wv) > 1 and str(wv[1]).lower() != "default"):
+                    wv[1] = "default"
+                    msg += " Precision set back to 'default' (the file is already fp8)."
+                applied.append(msg)
             suggestions.append({
                 "current": short,
                 "loader": loader_type,
@@ -1034,6 +1053,18 @@ def inject_speedups(data, options=None):
 
     applied, skipped, needs = [], [], []
 
+    # 0) Lighter-model suggestions (and safe fp8 file swaps) FIRST, so the fp8
+    #    precision pass below sees the post-swap filenames and won't re-cast a
+    #    file that is already fp8.
+    suggestions = []
+    if do_lighter:
+        light = suggest_lighter_models(data, apply_safe=lighter_apply)
+        suggestions = light["suggestions"]
+        applied.extend(light["applied"])
+        if any(s["kind"] == "gguf" for s in suggestions):
+            needs.append("To use a GGUF alternative, install the ComfyUI-GGUF "
+                         "custom node and swap the loader to 'Unet Loader (GGUF)'.")
+
     # TeaCache needs the model family up front so we can set model_type correctly.
     model_type = _detect_teacache_model_type(data) if do_teacache else None
     factories = []
@@ -1061,7 +1092,11 @@ def inject_speedups(data, options=None):
                 cur = str(wv[1]).lower()
                 name = (wv[0] if wv else "") or "model"
                 short = str(name).rsplit("/", 1)[-1]
-                if "fp8" in cur:
+                if _is_prequantized_filename(name):
+                    # Already a quantized file (incl. a file we just swapped in) —
+                    # leave weight_dtype alone; re-casting would hurt fp8_scaled.
+                    skipped.append(f"{short}: already a quantized file — left precision as is.")
+                elif "fp8" in cur:
                     skipped.append(f"{short}: already fp8 ({wv[1]}).")
                 else:
                     wv[1] = fp8_value
@@ -1091,16 +1126,6 @@ def inject_speedups(data, options=None):
     if fp8_value == "fp8_e4m3fn":
         needs.append("On an RTX 40xx/50xx you can switch fp8 to the faster "
                      "'fp8_e4m3fn_fast' variant for extra speed.")
-
-    # Lighter-model suggestions (and safe fp8 file swaps).
-    suggestions = []
-    if do_lighter:
-        light = suggest_lighter_models(data, apply_safe=lighter_apply)
-        suggestions = light["suggestions"]
-        applied.extend(light["applied"])
-        if any(s["kind"] == "gguf" for s in suggestions):
-            needs.append("To use a GGUF alternative, install the ComfyUI-GGUF "
-                         "custom node and swap the loader to 'Unet Loader (GGUF)'.")
 
     return {"applied": applied, "skipped": skipped, "needs_setup": needs,
             "suggestions": suggestions}

@@ -71,6 +71,8 @@
   .actions { display: flex; gap: 8px; align-items: center; }
   .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
   .grow { flex: 1; }
+  .swap-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; user-select: none; }
+  .swap-toggle input { cursor: pointer; }
   .drop {
     border: 2px dashed var(--border); border-radius: 10px; padding: 26px; text-align: center;
     color: var(--muted); cursor: pointer; transition: border-color .15s;
@@ -309,6 +311,9 @@
         <h2 style="margin:0;"><span class="step">2</span> Edit</h2>
         <span class="cat-badge" id="edCat"></span>
         <div class="grow"></div>
+        <label class="swap-toggle" title="Also swap heavy models for lighter compatible versions (fp8) and suggest downloads">
+          <input type="checkbox" id="edSwapModels"> Trocar modelos
+        </label>
         <button class="ghost" onclick="generateFaster()" id="edFasterBtn"
           title="Inject native speed-ups (fp8 + torch.compile) into the workflow">⚡ Generate Faster (DEMO)</button>
         <button onclick="exportWorkflow()" id="edExportBtn">⬇ Export workflow.json</button>
@@ -1283,9 +1288,11 @@ async function generateFaster() {
   const btn = document.getElementById('edFasterBtn');
   btn.disabled = true; const orig = btn.textContent; btn.textContent = '⚡ ...';
 
+  const body = buildEditorBody();
+  body.swap_models = document.getElementById('edSwapModels').checked;
   const r = await api('/api/workflow/optimize', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(buildEditorBody())
+    body: JSON.stringify(body)
   });
   btn.disabled = false; btn.textContent = orig;
   if (r.error) { alert('Optimize failed: ' + r.error); return; }

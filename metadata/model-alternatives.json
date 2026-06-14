@@ -80,6 +80,74 @@
                     "note": "Official Comfy-Org fp8 repack of the same WAN 2.1 t2v 14B model — same loader, roughly half the VRAM."
                 }
             ]
+        },
+        {
+            "label": "WAN 2.2 i2v high-noise 14B",
+            "match": "wan2\\.?2.*i2v.*high.?noise.*14b",
+            "skip_if": "fp8|gguf|q\\d|scaled",
+            "alternatives": [
+                {
+                    "filename": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~14 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8_scaled repack of the WAN 2.2 i2v high-noise expert — same loader. Load with weight_dtype 'default' (the file is already scaled fp8)."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.2 i2v low-noise 14B",
+            "match": "wan2\\.?2.*i2v.*low.?noise.*14b",
+            "skip_if": "fp8|gguf|q\\d|scaled",
+            "alternatives": [
+                {
+                    "filename": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~14 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8_scaled repack of the WAN 2.2 i2v low-noise expert — same loader. Load with weight_dtype 'default' (the file is already scaled fp8)."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.2 t2v high-noise 14B",
+            "match": "wan2\\.?2.*t2v.*high.?noise.*14b",
+            "skip_if": "fp8|gguf|q\\d|scaled",
+            "alternatives": [
+                {
+                    "filename": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~14 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8_scaled repack of the WAN 2.2 t2v high-noise expert — same loader. Load with weight_dtype 'default' (the file is already scaled fp8)."
+                }
+            ]
+        },
+        {
+            "label": "WAN 2.2 t2v low-noise 14B",
+            "match": "wan2\\.?2.*t2v.*low.?noise.*14b",
+            "skip_if": "fp8|gguf|q\\d|scaled",
+            "alternatives": [
+                {
+                    "filename": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+                    "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+                    "directory": "diffusion_models",
+                    "size_text": "~14 GB",
+                    "kind": "fp8",
+                    "same_loader": true,
+                    "for_loaders": ["UNETLoader"],
+                    "note": "Official Comfy-Org fp8_scaled repack of the WAN 2.2 t2v low-noise expert — same loader. Load with weight_dtype 'default' (the file is already scaled fp8)."
+                }
+            ]
         }
     ]
 }
